@@ -282,6 +282,34 @@ class UpdaterSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "invalid SHA-256"):
                 updater.check_for_updates()
 
+    def test_newest_valid_manifest_wins_over_stale_latest_redirect(self) -> None:
+        stale = {
+            "latest_version": "1.0.9.1.1",
+            "macos_zip_url": (
+                f"https://github.com/{GITHUB_REPO_SLUG}/releases/download/"
+                "auto-v1.0.9.1.1/Syllora-1.0.9.1.1-macos.zip"
+            ),
+            "sha256": "a" * 64,
+        }
+        fresh = {
+            "latest_version": "1.0.9.2.1",
+            "macos_zip_url": (
+                f"https://github.com/{GITHUB_REPO_SLUG}/releases/download/"
+                "auto-v1.0.9.2.1/Syllora-1.0.9.2.1-macos.zip"
+            ),
+            "sha256": "b" * 64,
+        }
+        responses = [stale, fresh, fresh, fresh]
+        with (
+            patch.object(updater, "_load_json_from_url", side_effect=responses),
+            patch.object(updater, "current_update_version", return_value="1.0.9.1.1"),
+        ):
+            result = updater.check_for_updates()
+
+        self.assertTrue(result["update_available"])
+        self.assertEqual(result["latest_version"], "1.0.9.2.1")
+        self.assertEqual(result["sha256"], "b" * 64)
+
     def test_private_or_missing_manifest_has_actionable_error(self) -> None:
         not_found = urllib.error.HTTPError(
             updater.LATEST_RELEASE_MANIFEST_URL,

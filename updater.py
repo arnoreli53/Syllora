@@ -145,17 +145,40 @@ def _load_json_from_url(url: str, *, timeout: int = 10) -> dict:
     return data
 
 
+def _validated_update_manifest(data: dict) -> dict:
+    required = ("latest_version", "macos_zip_url", "sha256")
+    missing = [key for key in required if key not in data]
+    if missing:
+        raise RuntimeError(f"Update manifest missing required keys: {', '.join(missing)}")
+
+    latest = str(data["latest_version"]).strip()
+    zip_url = str(data["macos_zip_url"]).strip()
+    expected_prefix = f"https://github.com/{GITHUB_REPO_SLUG}/releases/download/"
+    if not zip_url.startswith(expected_prefix):
+        raise RuntimeError("Update manifest points outside the official Syllora GitHub releases.")
+
+    notes = data.get("release_notes", [])
+    if not isinstance(notes, list):
+        notes = [str(notes)]
+
+    return {
+        "latest_version": latest,
+        "zip_url": zip_url,
+        "sha256": _validated_sha256(str(data["sha256"])),
+        "release_notes": [str(note) for note in notes],
+    }
+
+
 def check_for_updates() -> dict:
     errors: list[tuple[str, Exception]] = []
-    data: dict | None = None
+    manifests: list[dict] = []
     for url in LATEST_JSON_URLS:
         try:
-            data = _load_json_from_url(url, timeout=10)
-            break
+            manifests.append(_validated_update_manifest(_load_json_from_url(url, timeout=10)))
         except Exception as exc:
             errors.append((url, exc))
 
-    if data is None:
+    if not manifests:
         not_found = bool(errors) and all(
             isinstance(exc, urllib.error.HTTPError) and exc.code == 404
             for _, exc in errors
@@ -177,29 +200,13 @@ def check_for_updates() -> dict:
             f"Last error: {detail}"
         )
 
-    required = ("latest_version", "macos_zip_url", "sha256")
-    missing = [k for k in required if k not in data]
-    if missing:
-        raise RuntimeError(f"Update manifest missing required keys: {', '.join(missing)}")
-
-    latest = str(data["latest_version"]).strip()
-    zip_url = str(data["macos_zip_url"]).strip()
-    expected_prefix = f"https://github.com/{GITHUB_REPO_SLUG}/releases/download/"
-    if not zip_url.startswith(expected_prefix):
-        raise RuntimeError("Update manifest points outside the official Syllora GitHub releases.")
-    sha256 = _validated_sha256(str(data["sha256"]))
-    notes = data.get("release_notes", [])
-    if not isinstance(notes, list):
-        notes = [str(notes)]
+    newest = max(manifests, key=lambda manifest: parse_version(manifest["latest_version"]))
     current_version = current_update_version()
 
     return {
-        "update_available": parse_version(latest) > parse_version(current_version),
+        "update_available": parse_version(newest["latest_version"]) > parse_version(current_version),
         "current_version": current_version,
-        "latest_version": latest,
-        "zip_url": zip_url,
-        "sha256": sha256,
-        "release_notes": [str(x) for x in notes],
+        **newest,
     }
 
 
