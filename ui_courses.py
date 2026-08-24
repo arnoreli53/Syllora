@@ -4,7 +4,7 @@ from collections.abc import Callable
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QRect, QTimer, Signal, QEvent, QModelIndex, QObject, QThread, QPropertyAnimation, QParallelAnimationGroup, QEasingCurve
-from PySide6.QtGui import QColor, QBrush, QPalette, QLinearGradient
+from PySide6.QtGui import QColor, QBrush, QPalette
 from PySide6.QtSql import QSqlDatabase, QSqlQuery, QSqlTableModel
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -41,7 +41,7 @@ from transcript_import import (
     TranscriptImportCoordinator,
     transcript_openai_available,
 )
-from ui_common import apply_body_font, common_page_stylesheet, font_metrics, make_version_label, scaled_row_height, theme_colors
+from ui_common import apply_body_font, common_page_stylesheet, font_metrics, scaled_row_height, theme_colors
 from ui_settings import (
     get_compact_rows,
     get_confirm_delete,
@@ -50,6 +50,7 @@ from ui_settings import (
     get_gpa_last_x_credit_hours,
     get_gpa_view_mode,
     get_grade_calc_mode,
+    get_grade_display_mode,
     get_syllabus_ai_model,
     get_theme,
     grade_scale_row_for_gpa43,
@@ -354,7 +355,19 @@ def save_previous_courses(rows: list[dict]) -> None:
         raise
 
 
-def calculate_previous_course_gpa_metrics(rows: list[dict], last_x_credit_hours: int) -> dict[str, dict]:
+def calculate_previous_course_gpa_metrics(
+    rows: list[dict],
+    last_x_credit_hours: int,
+    grade_display_mode: str | None = None,
+) -> dict[str, dict]:
+    selected_mode = (
+        get_grade_display_mode()
+        if grade_display_mode is None
+        else str(grade_display_mode).strip().lower()
+    )
+    use_gpa43 = selected_mode == "gpa4.3"
+    scale_label = "4.3" if use_gpa43 else "4.0"
+
     normalized_rows: list[dict] = []
     for row in rows:
         try:
@@ -370,7 +383,18 @@ def calculate_previous_course_gpa_metrics(rows: list[dict], last_x_credit_hours:
             final_percent = -1.0
         final_letter = str(row.get("final_letter", "") or "").strip()
 
-        gpa_points = gpa4_for_percent(final_percent) if final_percent >= 0 else gpa4_for_grade_label(final_letter)
+        if final_percent >= 0:
+            gpa_points = (
+                gpa43_for_percent(final_percent)
+                if use_gpa43
+                else gpa4_for_percent(final_percent)
+            )
+        else:
+            gpa_points = (
+                gpa43_for_grade_label(final_letter)
+                if use_gpa43
+                else gpa4_for_grade_label(final_letter)
+            )
         if gpa_points is None:
             continue
 
@@ -406,6 +430,7 @@ def calculate_previous_course_gpa_metrics(rows: list[dict], last_x_credit_hours:
         metrics["cumulative"] = {
             "title": "Cumulative",
             "gpa": cumulative_quality_points / cumulative_credits,
+            "scale": scale_label,
             "credits": cumulative_credits,
             "course_count": len(normalized_rows),
         }
@@ -426,6 +451,7 @@ def calculate_previous_course_gpa_metrics(rows: list[dict], last_x_credit_hours:
         metrics["last_x"] = {
             "title": f"Last {last_x_credit_hours} Credit Hours",
             "gpa": selected_quality_points / selected_credits,
+            "scale": scale_label,
             "credits": selected_credits,
             "course_count": len(selected_rows),
             "target_credits": int(last_x_credit_hours),
@@ -2496,6 +2522,7 @@ class CoursesPage(QWidget):
                     "Cumulative",
                     float(cumulative["gpa"]),
                     [
+                        f"{cumulative['scale']} GPA scale",
                         f"Using {format_credit_hours(cumulative['credits'])} credit hours",
                         f"{int(cumulative['course_count'])} previous course(s)",
                     ],
@@ -2505,6 +2532,7 @@ class CoursesPage(QWidget):
         if view_mode in {"last_x", "both"} and "last_x" in metrics:
             last_x = metrics["last_x"]
             lines = [
+                f"{last_x['scale']} GPA scale",
                 f"Using {format_credit_hours(last_x['credits'])} credit hours",
                 f"{int(last_x['course_count'])} previous course(s)",
             ]
@@ -2531,14 +2559,18 @@ class CoursesPage(QWidget):
         colors = theme_colors(theme)
         apply_body_font(self, mode)
         self.setStyleSheet(
-            common_page_stylesheet(mode, theme=theme, title_px=18)
+            common_page_stylesheet(mode, theme=theme, title_px=20)
             + course_success_button_styles(mode, theme)
             +
             f"""
-            QFrame#Card {{
-                background: {colors['card_bg']};
-                border: 1px solid {colors['border']};
-                border-radius: 16px;
+            QFrame#CoursesListSurface {{
+                background: transparent;
+                border: none;
+            }}
+            QFrame#CoursesGpaPanel {{
+                background: {colors['surface_bg']};
+                border: none;
+                border-radius: 20px;
             }}
             QHeaderView::section {{
                 background: {colors['window_alt_bg']};
@@ -2575,9 +2607,9 @@ class CoursesPage(QWidget):
                 font-weight: 700;
             }}
             QFrame#CoursesGpaStatCard {{
-                background: {colors['window_alt_bg']};
-                border: 1px solid {colors['border']};
-                border-radius: 12px;
+                background: {colors['surface_alt_bg']};
+                border: none;
+                border-radius: 14px;
             }}
             QLabel#CoursesGpaStatTitle {{
                 color: {colors['text_soft']};
@@ -2593,10 +2625,9 @@ class CoursesPage(QWidget):
             }}
             QLabel#CoursesGpaEmpty {{
                 color: {colors['muted_text']};
-                background: {colors['window_alt_bg']};
-                border: 1px dashed {colors['border']};
-                border-radius: 12px;
-                padding: 16px;
+                background: transparent;
+                border: none;
+                padding: 20px 14px;
             }}
             """
         )
@@ -2695,58 +2726,44 @@ def draw_course_row_card(
     if not left_rect.isValid():
         return
 
-    margin = 10
+    margin = 5
     row_rect = QRect(
         margin,
-        left_rect.top() + 4,
+        left_rect.top() + 2,
         max(0, view.viewport().width() - (2 * margin)),
-        max(0, left_rect.height() - 8),
+        max(0, left_rect.height() - 4),
     )
 
     selected = bool(option.state & QStyle.StateFlag.State_Selected)
     dark = get_theme() == "dark"
-    gradient = QLinearGradient(row_rect.topLeft(), row_rect.bottomLeft())
+    card_fill = QColor(theme_colors(get_theme())["row_default_bg"])
     if completion_ready and selected and dark:
-        gradient.setColorAt(0.0, QColor(35, 78, 53))
-        gradient.setColorAt(1.0, QColor(28, 62, 43))
+        card_fill = QColor(28, 62, 43)
     elif completion_ready and selected:
-        gradient.setColorAt(0.0, QColor(235, 252, 241))
-        gradient.setColorAt(1.0, QColor(220, 247, 229))
+        card_fill = QColor(220, 247, 229)
     elif completion_ready and dark:
-        gradient.setColorAt(0.0, QColor(28, 56, 39))
-        gradient.setColorAt(1.0, QColor(22, 44, 31))
+        card_fill = QColor(22, 44, 31)
     elif completion_ready:
-        gradient.setColorAt(0.0, QColor(244, 253, 247))
-        gradient.setColorAt(1.0, QColor(232, 249, 238))
+        card_fill = QColor(232, 249, 238)
     elif selected and dark:
-        gradient.setColorAt(0.0, QColor(48, 57, 74))
-        gradient.setColorAt(1.0, QColor(39, 47, 63))
+        card_fill = QColor(theme_colors(get_theme())["row_selection_bg"])
     elif selected:
-        gradient.setColorAt(0.0, QColor(253, 254, 255))
-        gradient.setColorAt(1.0, QColor(241, 245, 255))
-    elif dark:
-        gradient.setColorAt(0.0, QColor(48, 48, 51))
-        gradient.setColorAt(1.0, QColor(41, 41, 44))
-    else:
-        gradient.setColorAt(0.0, QColor(255, 255, 255))
-        gradient.setColorAt(1.0, QColor(249, 251, 255))
+        card_fill = QColor(241, 245, 255)
 
     painter.save()
     painter.setRenderHint(painter.RenderHint.Antialiasing, True)
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(0, 0, 0, 36) if dark else QColor(26, 36, 78, 8))
-    painter.drawRoundedRect(row_rect.adjusted(0, 1, 0, 1), 12, 12)
-    painter.setBrush(gradient)
-    painter.drawRoundedRect(row_rect, 12, 12)
+    painter.setBrush(card_fill)
+    painter.drawRoundedRect(row_rect, 9, 9)
 
-    painter.setBrush(Qt.BrushStyle.NoBrush)
     if completion_ready and dark:
+        painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QColor(74, 151, 103))
+        painter.drawRoundedRect(row_rect, 9, 9)
     elif completion_ready:
+        painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QColor(139, 208, 164))
-    else:
-        painter.setPen(QColor(70, 70, 70) if dark else QColor(225, 228, 241))
-    painter.drawRoundedRect(row_rect, 12, 12)
+        painter.drawRoundedRect(row_rect, 9, 9)
 
     if selected:
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -2756,7 +2773,7 @@ def draw_course_row_card(
             painter.setPen(QColor(61, 177, 104))
         else:
             painter.setPen(QColor(55, 148, 255) if dark else QColor(170, 181, 255))
-        painter.drawRoundedRect(row_rect, 12, 12)
+        painter.drawRoundedRect(row_rect.adjusted(1, 1, -1, -1), 9, 9)
 
     painter.restore()
 
@@ -2960,12 +2977,12 @@ def build_courses_tab() -> QWidget:
     gpa_content_widget.setLayout(gpa_content_layout)
 
     gpa_panel = QFrame()
-    gpa_panel.setObjectName("Card")
+    gpa_panel.setObjectName("CoursesGpaPanel")
     gpa_panel.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
     gpa_panel.setMinimumWidth(320)
     gpa_layout = QVBoxLayout()
-    gpa_layout.setContentsMargins(12, 12, 12, 12)
-    gpa_layout.setSpacing(10)
+    gpa_layout.setContentsMargins(16, 16, 16, 16)
+    gpa_layout.setSpacing(12)
     gpa_layout.addWidget(gpa_heading)
     gpa_layout.addWidget(gpa_content_widget, 1)
     gpa_panel.setLayout(gpa_layout)
@@ -3021,7 +3038,6 @@ def build_courses_tab() -> QWidget:
     title.setObjectName("Title")
     subtitle = QLabel("Add and manage your courses. Import completed courses via AI.")
     subtitle.setObjectName("Subtitle")
-    version_label = make_version_label()
 
     left = QVBoxLayout()
     left.setSpacing(2)
@@ -3033,7 +3049,6 @@ def build_courses_tab() -> QWidget:
     header_top.setSpacing(10)
     header_top.addLayout(left)
     header_top.addStretch(1)
-    header_top.addWidget(version_label)
 
     header = QVBoxLayout()
     header.setContentsMargins(0, 0, 0, 0)
@@ -3042,21 +3057,21 @@ def build_courses_tab() -> QWidget:
     header.addWidget(btn_bar_widget)
 
     card = QFrame()
-    card.setObjectName("Card")
+    card.setObjectName("CoursesListSurface")
     card_layout = QVBoxLayout()
-    card_layout.setContentsMargins(14, 14, 14, 14)
+    card_layout.setContentsMargins(10, 10, 10, 12)
     card_layout.addWidget(table)
     card_layout.addWidget(empty_label)
     card.setLayout(card_layout)
 
     content = QHBoxLayout()
-    content.setSpacing(12)
+    content.setSpacing(14)
     content.addWidget(card, 1)
     content.addWidget(gpa_panel)
 
     root = QVBoxLayout()
-    root.setContentsMargins(14, 14, 14, 14)
-    root.setSpacing(10)
+    root.setContentsMargins(18, 16, 18, 18)
+    root.setSpacing(14)
     root.addLayout(header)
     root.addLayout(content)
     page.setLayout(root)

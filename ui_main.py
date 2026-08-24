@@ -126,7 +126,7 @@ class MainWindow(QMainWindow):
 
         self.chrome_bar = QWidget()
         self.chrome_bar.setObjectName("AppChromeBar")
-        self.chrome_bar.setFixedHeight(8)
+        self.chrome_bar.setFixedHeight(1)
         self.chrome_title = QLabel("")
         self.chrome_title.setObjectName("AppChromeTitle")
         chrome_layout = QHBoxLayout()
@@ -264,7 +264,7 @@ class MainWindow(QMainWindow):
         colors = theme_colors(theme)
         apply_app_theme(QApplication.instance(), theme)
         self.tab_widget.setStyleSheet(main_tab_stylesheet(theme))
-        self.chrome_bar.setVisible(theme == "dark")
+        self.chrome_bar.setVisible(False)
         self.chrome_bar.setStyleSheet(
             f"QWidget#AppChromeBar {{ background: {colors['window_alt_bg']}; border-bottom: 1px solid {colors['border']}; }}"
             f"QLabel#AppChromeTitle {{ color: {colors['text_soft']}; font-weight: 700; font-size: 13px; }}"

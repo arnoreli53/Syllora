@@ -15,4 +15,3 @@ syllora.sqlite
 *.db-shm
 *.sqlite-wal
 *.sqlite-shm
-updates/

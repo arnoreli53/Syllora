@@ -724,9 +724,9 @@ class DropLabel(QLabel):
 
 
 class SwitchCheckBox(QCheckBox):
-    TRACK_W = 42
-    TRACK_H = 24
-    KNOB_D = 18
+    TRACK_W = 38
+    TRACK_H = 22
+    KNOB_D = 16
 
     def __init__(self, text: str = "", parent=None):
         super().__init__(text, parent)
@@ -791,9 +791,9 @@ class SwitchCheckBox(QCheckBox):
         knob_x = off_x + ((on_x - off_x) * progress)
         knob_rect = QRectF(knob_x, track_rect.top() + inset, self.KNOB_D, self.KNOB_D)
 
-        off_track_color = QColor("#E5E7EB") if not dark else QColor("#5F6368")
+        off_track_color = QColor("#E5E7EB") if not dark else QColor("#303B47")
         on_track_color = QColor(colors["accent"])
-        off_knob_color = QColor("#6B7280") if not dark else QColor("#D4D4D4")
+        off_knob_color = QColor("#6B7280") if not dark else QColor("#B8C2CC")
         on_knob_color = QColor("#FFFFFF")
 
         track_color = self._blend_color(off_track_color, on_track_color, progress)
@@ -2699,10 +2699,11 @@ class SettingsPage(QWidget):
             return row
 
         def _build_section(title_text: str, rows: list[QWidget]) -> QWidget:
-            section = QWidget()
+            section = QFrame()
+            section.setObjectName("SettingsSection")
             layout = QVBoxLayout()
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(6)
+            layout.setContentsMargins(14, 13, 14, 14)
+            layout.setSpacing(9)
             heading = QLabel(title_text)
             heading.setObjectName("Section")
             layout.addWidget(heading)
@@ -2785,7 +2786,7 @@ class SettingsPage(QWidget):
             )
         )
 
-        self.footer_note = QLabel("Developed by Arnor Erlendsson; Do not distribute.")
+        self.footer_note = QLabel("Syllora · Built by Arnor Erlendsson")
         self.footer_note.setObjectName("FooterNote")
         self.footer_note.setWordWrap(True)
 
@@ -2893,8 +2894,8 @@ class SettingsPage(QWidget):
         left_panel = QFrame()
         left_panel.setObjectName("Panel")
         lp = QVBoxLayout()
-        lp.setContentsMargins(12, 12, 12, 12)
-        lp.setSpacing(10)
+        lp.setContentsMargins(0, 0, 0, 0)
+        lp.setSpacing(12)
         lp.addWidget(user_section)
         lp.addWidget(defaults_section)
         lp.addWidget(overview_section)
@@ -2970,8 +2971,8 @@ class SettingsPage(QWidget):
         right_panel = QFrame()
         right_panel.setObjectName("Panel")
         rp = QVBoxLayout()
-        rp.setContentsMargins(12, 12, 12, 12)
-        rp.setSpacing(10)
+        rp.setContentsMargins(0, 0, 0, 0)
+        rp.setSpacing(12)
         rp.addWidget(display_section)
         rp.addWidget(courses_section)
         rp.addWidget(backup_section)
@@ -2980,7 +2981,7 @@ class SettingsPage(QWidget):
         right_panel.setLayout(rp)
 
         panels_row = QHBoxLayout()
-        panels_row.setSpacing(12)
+        panels_row.setSpacing(14)
         panels_row.addWidget(left_panel, 1)
         panels_row.addWidget(right_panel, 1)
         self._settings_panels_layout = panels_row
@@ -3000,8 +3001,8 @@ class SettingsPage(QWidget):
         card = QFrame()
         card.setObjectName("Card")
         card_layout = QVBoxLayout()
-        card_layout.setContentsMargins(10, 10, 10, 10)
-        card_layout.setSpacing(8)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(0)
         card_layout.addLayout(panels_row)
         card.setLayout(card_layout)
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
@@ -3012,12 +3013,21 @@ class SettingsPage(QWidget):
         settings_scroll.setWidgetResizable(True)
         settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
         settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        settings_scroll.setWidget(card)
+        settings_content = QWidget()
+        settings_content_layout = QHBoxLayout()
+        settings_content_layout.setContentsMargins(0, 0, 0, 0)
+        settings_content_layout.setSpacing(0)
+        settings_content_layout.addStretch(1)
+        settings_content_layout.addWidget(card, 0, Qt.AlignmentFlag.AlignTop)
+        settings_content_layout.addStretch(1)
+        settings_content.setLayout(settings_content_layout)
+        settings_scroll.setWidget(settings_content)
         self._settings_scroll = settings_scroll
+        self._settings_content = settings_content
 
         root = QVBoxLayout()
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(6)
+        root.setContentsMargins(18, 16, 18, 14)
+        root.setSpacing(10)
         root.addLayout(header)
         root.addWidget(settings_scroll, 1)
         root.addWidget(self.footer_note)
@@ -3036,7 +3046,10 @@ class SettingsPage(QWidget):
         if layout is None or card is None:
             return
 
-        stacked = self.width() < 980
+        stacked = self.width() < 1240
+        viewport_width = self._settings_scroll.viewport().width()
+        available_width = viewport_width if viewport_width > 100 else max(560, self.width() - 36)
+        card.setFixedWidth(min(960, available_width) if stacked else available_width)
         direction = QBoxLayout.Direction.TopToBottom if stacked else QBoxLayout.Direction.LeftToRight
         if layout.direction() != direction:
             layout.setDirection(direction)
@@ -3083,14 +3096,17 @@ class SettingsPage(QWidget):
             +
             f"""
             QFrame#Card {{
-                background: {colors['window_alt_bg']};
-                border: 1px solid {colors['border']};
-                border-radius: 12px;
+                background: transparent;
+                border: none;
             }}
             QFrame#Panel {{
-                background: {colors['panel_bg']};
-                border: 1px solid {colors['border_soft']};
-                border-radius: 10px;
+                background: transparent;
+                border: none;
+            }}
+            QFrame#SettingsSection {{
+                background: {colors['card_bg']};
+                border: none;
+                border-radius: 16px;
             }}
             QLabel#SettingLabel {{
                 color: {colors['text_soft']};

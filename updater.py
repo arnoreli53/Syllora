@@ -8,6 +8,7 @@ import subprocess
 import sys
 import shlex
 import tempfile
+import urllib.error
 import urllib.request
 import webbrowser
 import zipfile
@@ -145,17 +146,32 @@ def _load_json_from_url(url: str, *, timeout: int = 10) -> dict:
 
 
 def check_for_updates() -> dict:
-    errors: list[str] = []
+    errors: list[tuple[str, Exception]] = []
     data: dict | None = None
     for url in LATEST_JSON_URLS:
         try:
             data = _load_json_from_url(url, timeout=10)
             break
         except Exception as exc:
-            errors.append(f"{url} -> {exc}")
+            errors.append((url, exc))
 
     if data is None:
-        detail = errors[-1] if errors else "unknown error"
+        not_found = bool(errors) and all(
+            isinstance(exc, urllib.error.HTTPError) and exc.code == 404
+            for _, exc in errors
+        )
+        if not_found:
+            raise RuntimeError(
+                "Update information was not found on GitHub.\n\n"
+                "The update release may not be published yet, or the Syllora repository "
+                "may be private. Private GitHub releases require authentication."
+            )
+
+        if errors:
+            last_url, last_error = errors[-1]
+            detail = f"{last_url} -> {last_error}"
+        else:
+            detail = "unknown error"
         raise RuntimeError(
             "Failed to fetch update manifest. GitHub could not be reached from the app.\n\n"
             f"Last error: {detail}"

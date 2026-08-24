@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -27,9 +28,10 @@ import updater
 import ui_settings
 import user_profiles
 from db_qt import close_db, open_db
-from ui_courses import list_current_course_completion_state
+from ui_courses import calculate_previous_course_gpa_metrics, list_current_course_completion_state
 from ui_settings import (
     SET_GRADE_CALC_MODE,
+    SET_GRADE_DISPLAY,
     SET_OPENAI_API_KEY,
     _import_backup_json,
     _set,
@@ -138,6 +140,42 @@ class DatabaseBehaviorTests(unittest.TestCase):
         set_str(SET_GRADE_CALC_MODE, "submitted_as_zero")
         self.assertAlmostEqual(list_current_course_completion_state()[course_id]["final_percent"], 50.0)
 
+    def test_previous_course_gpa_uses_selected_display_scale(self) -> None:
+        rows = [
+            {
+                "id": 1,
+                "course_name": "A Plus Course",
+                "final_percent": 95.0,
+                "final_letter": "",
+                "credit_hours": 3.0,
+                "term": "fall",
+                "academic_year_start": 2025,
+                "created_at": "2025-09-01",
+            },
+            {
+                "id": 2,
+                "course_name": "A Course",
+                "final_percent": -1.0,
+                "final_letter": "A",
+                "credit_hours": 3.0,
+                "term": "winter",
+                "academic_year_start": 2025,
+                "created_at": "2026-01-01",
+            },
+        ]
+
+        set_str(SET_GRADE_DISPLAY, "gpa4.0")
+        metrics_40 = calculate_previous_course_gpa_metrics(rows, 6)
+        self.assertAlmostEqual(metrics_40["cumulative"]["gpa"], 4.0)
+        self.assertAlmostEqual(metrics_40["last_x"]["gpa"], 4.0)
+        self.assertEqual(metrics_40["cumulative"]["scale"], "4.0")
+
+        set_str(SET_GRADE_DISPLAY, "gpa4.3")
+        metrics_43 = calculate_previous_course_gpa_metrics(rows, 6)
+        self.assertAlmostEqual(metrics_43["cumulative"]["gpa"], 4.15)
+        self.assertAlmostEqual(metrics_43["last_x"]["gpa"], 4.15)
+        self.assertEqual(metrics_43["cumulative"]["scale"], "4.3")
+
     @unittest.skipIf(load_workbook is None, "openpyxl is not installed")
     def test_excel_import_keeps_missing_due_date_unknown(self) -> None:
         from openpyxl import Workbook
@@ -242,6 +280,18 @@ class UpdaterSafetyTests(unittest.TestCase):
         invalid_hash = dict(base, sha256="not-a-checksum")
         with patch.object(updater, "_load_json_from_url", return_value=invalid_hash):
             with self.assertRaisesRegex(RuntimeError, "invalid SHA-256"):
+                updater.check_for_updates()
+
+    def test_private_or_missing_manifest_has_actionable_error(self) -> None:
+        not_found = urllib.error.HTTPError(
+            updater.LATEST_RELEASE_MANIFEST_URL,
+            404,
+            "Not Found",
+            None,
+            None,
+        )
+        with patch.object(updater, "_load_json_from_url", side_effect=not_found):
+            with self.assertRaisesRegex(RuntimeError, "repository may be private"):
                 updater.check_for_updates()
 
     def test_installer_checks_bundle_identity_and_signature(self) -> None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 from datetime import datetime
 from PySide6.QtCore import Qt, QDateTime, QTime, QSortFilterProxyModel, QRect, QTimer, QSettings, QEvent, QObject, Signal, QModelIndex
-from PySide6.QtGui import QColor, QBrush, QPalette, QLinearGradient, QPainter, QPen, QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QBrush, QPalette, QPainter, QPen, QKeySequence, QShortcut
 from PySide6.QtSql import QSqlRelationalTableModel, QSqlRelation, QSqlQuery
 
 from PySide6.QtWidgets import (
@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 
 # --- Settings imports ---
 
-from ui_common import apply_body_font, common_page_stylesheet, make_version_label, scaled_row_height, theme_colors
+from ui_common import apply_body_font, common_page_stylesheet, scaled_row_height, theme_colors
 from app_settings import app_qsettings
 from ui_settings import (
     SyllabusImportFlow,
@@ -311,64 +311,24 @@ def row_card_rect(view: QTableView, row: int, anchor_col: int) -> QRect:
     if not left_rect.isValid():
         return QRect()
 
-    margin = 10
+    margin = 5
     return QRect(
         margin,
-        left_rect.top() + 4,
+        left_rect.top() + 2,
         max(0, view.viewport().width() - (2 * margin)),
-        max(0, left_rect.height() - 8),
+        max(0, left_rect.height() - 4),
     )
 
 def paint_row_card_background(painter, row_rect: QRect, fill: QColor, *, selected: bool = False) -> None:
     if not row_rect.isValid():
         return
-    dark = get_theme() == "dark"
-    gradient = QLinearGradient(row_rect.topLeft(), row_rect.bottomLeft())
-    if selected and dark:
-        selected_fill = QColor(_theme_colors()["row_selection_bg"])
-        gradient.setColorAt(0.0, selected_fill.lighter(108))
-        gradient.setColorAt(1.0, selected_fill)
-    elif selected:
-        gradient.setColorAt(0.0, QColor(250, 252, 255))
-        gradient.setColorAt(1.0, QColor(236, 242, 255))
-    elif dark:
-        base = fill
-        gradient.setColorAt(
-            0.0,
-            QColor(
-                min(255, base.red() + 6),
-                min(255, base.green() + 6),
-                min(255, base.blue() + 6),
-            ),
-        )
-        gradient.setColorAt(
-            1.0,
-            QColor(
-                max(20, base.red() - 2),
-                max(20, base.green() - 2),
-                max(20, base.blue() - 2),
-            ),
-        )
-    else:
-        base = fill
-        gradient.setColorAt(0.0, QColor(255, 255, 255))
-        gradient.setColorAt(1.0, QColor(
-            max(245, base.red()),
-            max(247, base.green()),
-            max(250, base.blue()),
-        ))
+    card_fill = QColor(_theme_colors()["row_selection_bg"]) if selected else QColor(fill)
 
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(0, 0, 0, 36) if dark else QColor(26, 36, 78, 8))
-    painter.drawRoundedRect(row_rect.adjusted(0, 1, 0, 1), 12, 12)
-    painter.setBrush(gradient)
-    painter.drawRoundedRect(row_rect, 12, 12)
-
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.setPen(QColor(_theme_colors()["border"]))
-    painter.drawRoundedRect(row_rect, 12, 12)
+    painter.setBrush(card_fill)
+    painter.drawRoundedRect(row_rect, 9, 9)
 
     painter.restore()
 
@@ -381,7 +341,7 @@ def paint_row_card_selection_outline(painter, row_rect: QRect) -> None:
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.setPen(QPen(QColor(_theme_colors()["row_selection_border"]), 2))
-    painter.drawRoundedRect(row_rect.adjusted(1, 1, -1, -1), 12, 12)
+    painter.drawRoundedRect(row_rect.adjusted(1, 1, -1, -1), 9, 9)
     painter.restore()
 
 
@@ -2103,13 +2063,12 @@ class TasksPage(QWidget):
             self._apply_status_filter_options()
             apply_body_font(self, mode)
             self.setStyleSheet(
-                common_page_stylesheet(mode, theme=theme, title_px=18)
+                common_page_stylesheet(mode, theme=theme, title_px=20)
                 +
                 f"""
                 QFrame#Card {{
-                    background: {colors['card_bg']};
-                    border: 1px solid {colors['border']};
-                    border-radius: 16px;
+                    background: transparent;
+                    border: none;
                 }}
                 QTableView {{
                     background: transparent;
@@ -2136,11 +2095,11 @@ class TasksPage(QWidget):
                     color: {colors['text']};
                 }}
                 QHeaderView::section {{
-                    background: {colors['window_alt_bg']};
-                    padding: 9px 12px;
+                    background: transparent;
+                    padding: 10px 12px;
                     border: none;
-                    border-bottom: 1px solid {colors['border']};
-                    font-weight: 700;
+                    border-bottom: 1px solid {colors['border_soft']};
+                    font-weight: 600;
                     font-size: 11px;
                     color: {colors['header_text']};
                 }}
@@ -2201,7 +2160,6 @@ class TasksPage(QWidget):
         title.setObjectName("Title")
         subtitle = QLabel("Add assignments and track status, due dates, grades, and more.")
         subtitle.setObjectName("Subtitle")
-        version_label = make_version_label()
         self._status_banner_timer = QTimer(self)
         self._status_banner_timer.setSingleShot(True)
         self._status_banner_timer.setInterval(2400)
@@ -2378,7 +2336,7 @@ class TasksPage(QWidget):
         self.table.verticalHeader().setDefaultSectionSize(38 if get_compact_rows() else 42)
         self.table.setWordWrap(False)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
 
         #hh = self.table.horizontalHeader()
@@ -2703,8 +2661,6 @@ class TasksPage(QWidget):
         row1.setSpacing(12)
         row1.addWidget(title)
         row1.addStretch(1)
-        row1.addWidget(version_label)
-        row1.addSpacing(10)
 
         btn_bar = QHBoxLayout()
         btn_bar.setSpacing(10)
@@ -2717,7 +2673,7 @@ class TasksPage(QWidget):
         row2 = QHBoxLayout()
         row2.addWidget(subtitle)
         row2.addStretch(1)
-        shortcut_label = QLabel("add: ^N , duplicate: ^D")
+        shortcut_label = QLabel("Add ⇧N  ·  Duplicate ⇧D")
         shortcut_label.setObjectName("Subtitle")
         row2.addWidget(shortcut_label)
 
@@ -2752,14 +2708,14 @@ class TasksPage(QWidget):
         card = QFrame()
         card.setObjectName("Card")
         card_layout = QVBoxLayout()
-        card_layout.setContentsMargins(14, 14, 14, 14)
+        card_layout.setContentsMargins(10, 10, 10, 12)
         card_layout.addWidget(self.table)
         card_layout.addWidget(self.empty_label)
         card.setLayout(card_layout)
 
         root = QVBoxLayout()
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(10)
+        root.setContentsMargins(18, 16, 18, 18)
+        root.setSpacing(14)
         root.addLayout(header)
         root.addWidget(card, 1)
         self.setLayout(root)

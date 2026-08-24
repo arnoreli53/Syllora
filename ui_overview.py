@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon,
 )
 from PySide6.QtSql import QSqlQueryModel, QSqlQuery
-from ui_common import apply_body_font, common_page_stylesheet, make_version_label, scaled_row_height, theme_colors
+from ui_common import apply_body_font, common_page_stylesheet, scaled_row_height, theme_colors
 from ui_courses import format_current_course_grade_for_mode, list_current_course_completion_state
 
 
@@ -81,9 +81,9 @@ class RowCardDelegate(QStyledItemDelegate):
             left_rect = self.view.visualRect(left_idx)
 
             # Build a row-rect that spans the full viewport width (prevents squared right edge)
-            m = 6
+            m = 4
             vp_w = self.view.viewport().width()
-            row_rect = QRect(m, left_rect.top() + 6, max(0, vp_w - (2 * m)), max(0, left_rect.height() - 12))
+            row_rect = QRect(m, left_rect.top() + 3, max(0, vp_w - (2 * m)), max(0, left_rect.height() - 6))
 
             bg = model.data(left_idx, Qt.BackgroundRole)
             # Default subtle card background when there's no due/overdue highlight
@@ -94,17 +94,12 @@ class RowCardDelegate(QStyledItemDelegate):
             painter.setRenderHint(painter.RenderHint.Antialiasing, True)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(bg)
-            painter.drawRoundedRect(row_rect, 10, 10)
-
-            # Subtle border
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QColor(theme_colors(get_theme())["border"]))
-            painter.drawRoundedRect(row_rect, 10, 10)
+            painter.drawRoundedRect(row_rect, 9, 9)
 
             # If selected, add a slightly stronger outline
             if option.state & QStyle.StateFlag.State_Selected:
                 painter.setPen(QColor(theme_colors(get_theme())["row_selection_border"]))
-                painter.drawRoundedRect(row_rect.adjusted(1, 1, -1, -1), 10, 10)
+                painter.drawRoundedRect(row_rect.adjusted(1, 1, -1, -1), 9, 9)
 
             painter.restore()
 
@@ -596,7 +591,6 @@ class OverviewPage(QWidget):
 
         title = QLabel("Upcoming Assessments")
         title.setObjectName("Title")
-        version_label = make_version_label()
 
         self.btn_refresh = QPushButton("Refresh")
         self.btn_refresh.setObjectName("PrimaryButton")
@@ -615,7 +609,6 @@ class OverviewPage(QWidget):
         top.addLayout(left)
         top.addStretch(1)
         top.addWidget(self.btn_quick_add)
-        top.addWidget(version_label)
 
         self.model = OverviewModel()
         self.model.setParent(self)
@@ -668,7 +661,7 @@ class OverviewPage(QWidget):
         self.attention_scroll.setWidget(self.attention_container)
 
         grades_card = QFrame()
-        grades_card.setObjectName("Card")
+        grades_card.setObjectName("OverviewSideSurface")
         grades_card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         grades_card.setMinimumWidth(260)
         grades_card.setMaximumWidth(320)
@@ -821,27 +814,27 @@ class OverviewPage(QWidget):
         header_bar.setLayout(hb)
 
         upcoming_card = QFrame()
-        upcoming_card.setObjectName("Card")
+        upcoming_card.setObjectName("OverviewListSurface")
         self.upcoming_empty = OverviewEmptyState(
             "No upcoming assignments",
             "Tasks with upcoming due dates will appear here automatically.",
         )
         card_layout = QVBoxLayout()
-        card_layout.setContentsMargins(10, 10, 10, 10)
-        card_layout.setSpacing(10)
+        card_layout.setContentsMargins(12, 12, 12, 12)
+        card_layout.setSpacing(8)
         card_layout.addWidget(header_bar)
         card_layout.addWidget(self.table)
         card_layout.addWidget(self.upcoming_empty)
         upcoming_card.setLayout(card_layout)
 
         main = QHBoxLayout()
-        main.setSpacing(10)
+        main.setSpacing(14)
         main.addWidget(upcoming_card, 1)
         main.addWidget(grades_card)
 
         root = QVBoxLayout()
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(10)
+        root.setContentsMargins(18, 16, 18, 18)
+        root.setSpacing(14)
         root.addLayout(top)
         root.addLayout(main)
         self.setLayout(root)
@@ -1162,23 +1155,27 @@ class OverviewPage(QWidget):
         self.model.high_priority_due_soon_brush = QBrush(QColor(255, 218, 181) if theme == "light" else QColor("#49301D"))
         self.model.in_progress_brush = QBrush(QColor(223, 243, 255) if theme == "light" else QColor("#16314A"))
         self.setStyleSheet(
-            common_page_stylesheet(mode, theme=theme, title_px=18)
+            common_page_stylesheet(mode, theme=theme, title_px=20)
             +
             f"""
-            QFrame#Card {{
+            QFrame#OverviewListSurface {{
+                background: transparent;
+                border: none;
+            }}
+            QFrame#OverviewSideSurface {{
                 background: {colors['card_bg']};
-                border: 1px solid {colors['border']};
-                border-radius: 16px;
+                border: none;
+                border-radius: 20px;
             }}
             QFrame#HeaderBar {{
-                background: {colors['header_bg']};
-                border: 0px;
-                border-radius: 10px;
+                background: transparent;
+                border: none;
+                border-bottom: 1px solid {colors['border_soft']};
+                border-radius: 0px;
             }}
             QFrame#EmptyStateCard {{
-                background: {colors['empty_bg']};
-                border: 1px dashed {colors['empty_border']};
-                border-radius: 14px;
+                background: transparent;
+                border: none;
             }}
             QLabel#OverviewEmptyTitle {{
                 color: {colors['empty_title']};
@@ -1201,12 +1198,12 @@ class OverviewPage(QWidget):
             }}
             QFrame#OverviewGlanceCard, QFrame#OverviewGlanceHeroCard {{
                 background: {colors['surface_alt_bg']};
-                border: 1px solid {colors['border']};
-                border-radius: 12px;
+                border: none;
+                border-radius: 14px;
             }}
             QFrame#OverviewGlanceHeroCard {{
                 background: {colors['surface_bg']};
-                border: 1px solid {colors['accent_tint']};
+                border: none;
             }}
             QLabel#OverviewGlanceSectionLabel {{
                 color: {colors['muted_text']};
@@ -1262,12 +1259,12 @@ class OverviewPage(QWidget):
             """
         )
         self.grades_table.setStyleSheet(
-            f"QTableView {{ background: {colors['surface_bg']}; color: {colors['text']}; border: 1px solid {colors['border']}; "
+            f"QTableView {{ background: {colors['surface_bg']}; color: {colors['text']}; border: none; border-radius: 12px; "
             f"alternate-background-color: {colors['surface_alt_bg']}; }}"
             f"QTableView::item {{ padding: 8px 10px; border: none; }}"
             f"QTableView::item:alternate {{ background: {colors['surface_alt_bg']}; }}"
             f"QHeaderView::section {{ border: 0px; border-right: 0px; border-left: 0px; padding-left: 12px; padding-right: 8px; "
-            f"font-weight: 600; background: {colors['window_alt_bg']}; color: {colors['header_text']}; border-bottom: 1px solid {colors['border']}; }}"
+            f"font-weight: 600; background: transparent; color: {colors['header_text']}; border-bottom: 1px solid {colors['border_soft']}; }}"
         )
         grades_palette = QPalette(self.grades_table.palette())
         grades_palette.setColor(QPalette.ColorRole.Base, QColor(colors["surface_bg"]))
@@ -1468,7 +1465,7 @@ class OverviewPage(QWidget):
             viewport_width = self.table.viewport().width()
         except RuntimeError:
             return
-        available = max(640, viewport_width if viewport_width > 100 else self.width() - 48)
+        available = max(640, viewport_width if viewport_width > 100 else self.width() - 48) - 12
         course_width = 130 if available >= 760 else 110
         due_width = 170 if available >= 760 else 150
         badge_width = 74 if available >= 760 else 62
