@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 build/
 dist/
+generated_build_info.py
 *.spec.bak
 *.log
 
@@ -15,4 +16,3 @@ syllora.sqlite
 *.sqlite-wal
 *.sqlite-shm
 updates/
-

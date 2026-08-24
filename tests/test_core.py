@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QApplication
 
 import migrate
 import paths
+import release_metadata
 import updater
 import ui_settings
 import user_profiles
@@ -217,6 +218,13 @@ class DatabaseBehaviorTests(unittest.TestCase):
 
 
 class UpdaterSafetyTests(unittest.TestCase):
+    def test_latest_release_manifest_is_preferred(self) -> None:
+        self.assertEqual(updater.LATEST_JSON_URLS[0], updater.LATEST_RELEASE_MANIFEST_URL)
+        self.assertEqual(
+            updater.LATEST_RELEASE_MANIFEST_URL,
+            f"https://github.com/{GITHUB_REPO_SLUG}/releases/latest/download/latest.json",
+        )
+
     def test_manifest_requires_official_release_and_valid_checksum(self) -> None:
         base = {
             "latest_version": "99.0.0",
@@ -255,6 +263,38 @@ class UpdaterSafetyTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(syntax_check.returncode, 0, syntax_check.stderr)
+
+
+class ReleaseMetadataTests(unittest.TestCase):
+    def test_automated_release_manifest_matches_github_asset(self) -> None:
+        manifest = release_metadata.build_manifest(
+            version="1.0.9.42.1",
+            repository=GITHUB_REPO_SLUG,
+            release_tag="auto-v1.0.9.42.1",
+            asset_name="Syllora-1.0.9.42.1-macos.zip",
+            sha256="A" * 64,
+            release_notes=["Automated test release."],
+        )
+        self.assertEqual(manifest["latest_version"], "1.0.9.42.1")
+        self.assertEqual(manifest["sha256"], "a" * 64)
+        self.assertEqual(
+            manifest["macos_zip_url"],
+            "https://github.com/arnoreli53/Syllora/releases/download/"
+            "auto-v1.0.9.42.1/Syllora-1.0.9.42.1-macos.zip",
+        )
+
+    def test_release_metadata_rejects_unsafe_values(self) -> None:
+        common = {
+            "version": "1.0.9",
+            "repository": GITHUB_REPO_SLUG,
+            "release_tag": "v1.0.9",
+            "asset_name": "Syllora-1.0.9-macos.zip",
+            "sha256": "a" * 64,
+        }
+        with self.assertRaises(ValueError):
+            release_metadata.build_manifest(**dict(common, release_tag="../unsafe"))
+        with self.assertRaises(ValueError):
+            release_metadata.build_manifest(**dict(common, sha256="invalid"))
 
 
 class UiSmokeTests(unittest.TestCase):

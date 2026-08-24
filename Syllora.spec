@@ -1,19 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-import shutil
 import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path.cwd()))
 
-from version import APP_BUNDLE_IDENTIFIER, APP_DISPLAY_NAME
+from version import APP_BUNDLE_IDENTIFIER, APP_DISPLAY_NAME, APP_VERSION
 
 ICON_ICNS = Path.cwd() / "icon.icns"
 ICON_WINDOWED_ICNS = Path.cwd() / "icon-windowed.icns"
 
-if ICON_ICNS.exists():
-    shutil.copyfile(ICON_ICNS, ICON_WINDOWED_ICNS)
+for icon_path in (ICON_ICNS, ICON_WINDOWED_ICNS):
+    if not icon_path.is_file():
+        raise SystemExit(f'Missing required app icon: {icon_path}')
 
 try:
     import certifi  # noqa: F401
@@ -80,4 +80,8 @@ app = BUNDLE(
     name=f'{APP_DISPLAY_NAME}.app',
     icon='icon-windowed.icns',
     bundle_identifier=APP_BUNDLE_IDENTIFIER,
+    info_plist={
+        'CFBundleShortVersionString': APP_VERSION,
+        'CFBundleVersion': APP_VERSION,
+    },
 )

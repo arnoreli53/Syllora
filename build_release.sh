@@ -3,14 +3,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
-VENV_PYINSTALLER="$ROOT_DIR/.venv/bin/pyinstaller"
 SPEC_PATH="$ROOT_DIR/Syllora.spec"
 SPEC_STEM="${SPEC_PATH:t:r}"
 ICON_SOURCE="$ROOT_DIR/icon.png"
-ICONSET_DIR="$ROOT_DIR/icon.iconset"
 ICON_ICNS="$ROOT_DIR/icon.icns"
 ICON_WINDOWED_ICNS="$ROOT_DIR/icon-windowed.icns"
 INSTALL_HELPER_SOURCE="$ROOT_DIR/install_update.py"
+RELEASE_METADATA_TOOL="$ROOT_DIR/release_metadata.py"
+GENERATED_BUILD_INFO="$ROOT_DIR/generated_build_info.py"
 
 if [[ $# -ne 1 ]]; then
   cat >&2 <<'EOF'
@@ -34,8 +34,8 @@ if [[ ! -x "$VENV_PYTHON" ]]; then
   exit 1
 fi
 
-if [[ ! -x "$VENV_PYINSTALLER" ]]; then
-  echo "Missing PyInstaller at $VENV_PYINSTALLER" >&2
+if ! "$VENV_PYTHON" -c 'import PyInstaller' >/dev/null 2>&1; then
+  echo "PyInstaller is not installed in $ROOT_DIR/.venv." >&2
   exit 1
 fi
 
@@ -49,17 +49,20 @@ if [[ ! -f "$ICON_SOURCE" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$ICON_ICNS" || ! -f "$ICON_WINDOWED_ICNS" ]]; then
+  echo "Missing a compiled macOS app icon (icon.icns or icon-windowed.icns)." >&2
+  exit 1
+fi
+
 if [[ ! -f "$INSTALL_HELPER_SOURCE" ]]; then
   echo "Missing install helper at $INSTALL_HELPER_SOURCE" >&2
   exit 1
 fi
 
-for tool in sips iconutil; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "Missing required macOS icon build tool: $tool" >&2
-    exit 1
-  fi
-done
+if [[ ! -f "$RELEASE_METADATA_TOOL" ]]; then
+  echo "Missing release metadata helper at $RELEASE_METADATA_TOOL" >&2
+  exit 1
+fi
 
 cd "$ROOT_DIR"
 
@@ -77,6 +80,36 @@ if missing:
     )
 PY
 
+BASE_APP_VERSION="$("$VENV_PYTHON" - <<'PY'
+from version import BASE_APP_VERSION
+print(BASE_APP_VERSION)
+PY
+)"
+
+case "$RELEASE_VERSION" in
+  "$BASE_APP_VERSION"|"$BASE_APP_VERSION".*) ;;
+  *)
+    echo "Requested release version '$RELEASE_VERSION' must be '$BASE_APP_VERSION' or an automated build version starting with '$BASE_APP_VERSION.'." >&2
+    exit 1
+    ;;
+esac
+
+RELEASE_TAG="${SYLLORA_RELEASE_TAG:-v$RELEASE_VERSION}"
+BUILD_COMMIT="${GITHUB_SHA:-}"
+if [[ -z "$BUILD_COMMIT" ]] && command -v git >/dev/null 2>&1; then
+  BUILD_COMMIT="$(git rev-parse HEAD 2>/dev/null || true)"
+fi
+
+cleanup_generated_build_info() {
+  /bin/rm -f "$GENERATED_BUILD_INFO"
+}
+trap cleanup_generated_build_info EXIT
+
+"$VENV_PYTHON" "$RELEASE_METADATA_TOOL" build-info \
+  --output "$GENERATED_BUILD_INFO" \
+  --version "$RELEASE_VERSION" \
+  --commit "$BUILD_COMMIT"
+
 APP_VERSION="$("$VENV_PYTHON" - <<'PY'
 from version import APP_VERSION
 print(APP_VERSION)
@@ -84,17 +117,19 @@ PY
 )"
 
 APP_META=("${(@f)$("$VENV_PYTHON" - <<'PY'
-from version import APP_DISPLAY_NAME, APP_RELEASE_ARCHIVE_PREFIX, GITHUB_REPO_SLUG, UPDATE_TEST_CURRENT_VERSION_ENV
+from version import APP_BUNDLE_IDENTIFIER, APP_DISPLAY_NAME, APP_RELEASE_ARCHIVE_PREFIX, GITHUB_REPO_SLUG, UPDATE_TEST_CURRENT_VERSION_ENV
+print(APP_BUNDLE_IDENTIFIER)
 print(APP_DISPLAY_NAME)
 print(APP_RELEASE_ARCHIVE_PREFIX)
 print(GITHUB_REPO_SLUG)
 print(UPDATE_TEST_CURRENT_VERSION_ENV)
 PY
 )}")
-APP_DISPLAY_NAME="${APP_META[1]}"
-APP_RELEASE_ARCHIVE_PREFIX="${APP_META[2]}"
-GITHUB_REPO_SLUG="${APP_META[3]}"
-UPDATE_TEST_ENV_NAME="${APP_META[4]}"
+APP_BUNDLE_IDENTIFIER="${APP_META[1]}"
+APP_DISPLAY_NAME="${APP_META[2]}"
+APP_RELEASE_ARCHIVE_PREFIX="${APP_META[3]}"
+GITHUB_REPO_SLUG="${APP_META[4]}"
+UPDATE_TEST_ENV_NAME="${APP_META[5]}"
 
 if [[ "$APP_VERSION" != "$RELEASE_VERSION" ]]; then
   echo "Requested release version '$RELEASE_VERSION' does not match APP_VERSION '$APP_VERSION' in version.py." >&2
@@ -105,8 +140,8 @@ APP_BUNDLE="dist/${APP_DISPLAY_NAME}.app"
 ONEDIR_DIR="dist/${APP_DISPLAY_NAME}"
 ZIP_NAME="${APP_RELEASE_ARCHIVE_PREFIX}-${RELEASE_VERSION}-macos.zip"
 ZIP_PATH="dist/${ZIP_NAME}"
-PYINSTALLER_LOG_DIR="build/${SPEC_STEM}"
-PYINSTALLER_LOG_PATH="${PYINSTALLER_LOG_DIR}/pyinstaller-build.log"
+PYINSTALLER_LOG_DIR="build"
+PYINSTALLER_LOG_PATH="${PYINSTALLER_LOG_DIR}/pyinstaller-${SPEC_STEM}.log"
 BUNDLE_RESOURCES_DIR="$APP_BUNDLE/Contents/Resources"
 BUNDLED_ICON="$BUNDLE_RESOURCES_DIR/icon.icns"
 BUNDLED_ICON_PNG="$BUNDLE_RESOURCES_DIR/icon.png"
@@ -118,20 +153,8 @@ ONEDIR_WINDOWED_ICON="$ONEDIR_INTERNAL_DIR/icon-windowed.icns"
 ONEDIR_HELPER_DIR="$ONEDIR_DIR/_internal/update_helper"
 APP_HELPER_DIR="$BUNDLE_RESOURCES_DIR/update_helper"
 
-rm -rf "$ICONSET_DIR"
-mkdir -p "$ICONSET_DIR"
-
-for size in 16 32 128 256 512; do
-  retina_size=$((size * 2))
-  sips -z "$size" "$size" "$ICON_SOURCE" --out "$ICONSET_DIR/icon_${size}x${size}.png" >/dev/null
-  sips -z "$retina_size" "$retina_size" "$ICON_SOURCE" --out "$ICONSET_DIR/icon_${size}x${size}@2x.png" >/dev/null
-done
-
-iconutil -c icns "$ICONSET_DIR" -o "$ICON_ICNS"
-/bin/cp -f "$ICON_ICNS" "$ICON_WINDOWED_ICNS"
-
 mkdir -p "$PYINSTALLER_LOG_DIR"
-if ! "$VENV_PYINSTALLER" --clean --noconfirm "$SPEC_PATH" >"$PYINSTALLER_LOG_PATH" 2>&1; then
+if ! "$VENV_PYTHON" -m PyInstaller --clean --noconfirm "$SPEC_PATH" >"$PYINSTALLER_LOG_PATH" 2>&1; then
   echo "PyInstaller build failed. Full log:" >&2
   cat "$PYINSTALLER_LOG_PATH" >&2
   exit 1
@@ -208,15 +231,40 @@ if [[ -z "$EXPECTED_APP_HELPER" ]]; then
   exit 1
 fi
 
+BUNDLE_IDENTIFIER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true)"
+BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true)"
+if [[ "$BUNDLE_IDENTIFIER" != "$APP_BUNDLE_IDENTIFIER" ]]; then
+  echo "Packaged app has an unexpected bundle identifier: '${BUNDLE_IDENTIFIER:-<missing>}'" >&2
+  exit 1
+fi
+if [[ "$BUNDLE_VERSION" != "$RELEASE_VERSION" ]]; then
+  echo "Packaged app has an unexpected version: '${BUNDLE_VERSION:-<missing>}'" >&2
+  exit 1
+fi
+
+CODESIGN_IDENTITY="${SYLLORA_CODESIGN_IDENTITY:--}"
+/usr/bin/codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP_BUNDLE"
+/usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
+
 rm -f "$ZIP_PATH"
 ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$ZIP_PATH"
 
 SHA256="$(shasum -a 256 "$ZIP_PATH" | awk '{print $1}')"
 
+"$VENV_PYTHON" "$RELEASE_METADATA_TOOL" manifest \
+  --output "dist/latest.json" \
+  --version "$RELEASE_VERSION" \
+  --repository "$GITHUB_REPO_SLUG" \
+  --release-tag "$RELEASE_TAG" \
+  --asset-name "$ZIP_NAME" \
+  --sha256 "$SHA256" \
+  --note "${SYLLORA_RELEASE_NOTE:-Automatic update built from the latest code on the main branch.}"
+
 cat <<EOF
 Built app bundle: $APP_BUNDLE
 Built onedir output: $ONEDIR_DIR
 Built release zip: $ZIP_PATH
+Built update manifest: dist/latest.json
 SHA256: $SHA256
 PyInstaller log: $PYINSTALLER_LOG_PATH
 
@@ -229,13 +277,7 @@ Local updater test command:
   open -na "/Applications/$APP_DISPLAY_NAME.app"
   launchctl unsetenv $UPDATE_TEST_ENV_NAME
 
-Update manifest snippet:
-{
-  "latest_version": "$RELEASE_VERSION",
-  "macos_zip_url": "https://github.com/$GITHUB_REPO_SLUG/releases/download/v$RELEASE_VERSION/$ZIP_NAME",
-  "sha256": "$SHA256",
-  "release_notes": [
-    "Add release notes here"
-  ]
-}
+Update manifest:
 EOF
+
+cat dist/latest.json

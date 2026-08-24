@@ -42,7 +42,11 @@ from version import (
 )
 from paths import UPDATES_DIR
 
+LATEST_RELEASE_MANIFEST_URL = (
+    f"https://github.com/{GITHUB_REPO_SLUG}/releases/latest/download/latest.json"
+)
 LATEST_JSON_URLS = [
+    LATEST_RELEASE_MANIFEST_URL,
     f"https://raw.githubusercontent.com/{GITHUB_REPO_SLUG}/main/updates/latest.json",
     f"https://api.github.com/repos/{GITHUB_REPO_SLUG}/contents/updates/latest.json?ref=main",
     f"https://github.com/{GITHUB_REPO_SLUG}/raw/main/updates/latest.json",

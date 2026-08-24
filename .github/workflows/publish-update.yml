@@ -1,0 +1,122 @@
+name: Publish macOS update
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "updates/latest.json"
+      - "**/*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-macos-update
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Create unique update version
+        id: metadata
+        shell: bash
+        run: |
+          base_version="$(python -c 'from version import BASE_APP_VERSION; print(BASE_APP_VERSION)')"
+          version="${base_version}.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          tag="auto-v${version}"
+          asset="Syllora-${version}-macos.zip"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "asset=${asset}" >> "$GITHUB_OUTPUT"
+
+      - name: Install build dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements-dev.txt
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: .venv/bin/python -m unittest discover -s tests -v
+
+      - name: Build verified update
+        env:
+          SYLLORA_RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+          SYLLORA_RELEASE_NOTE: "Automatic update for commit ${{ github.sha }}."
+        run: ./build_release.sh "${{ steps.metadata.outputs.version }}"
+
+      - name: Validate release files
+        env:
+          EXPECTED_VERSION: ${{ steps.metadata.outputs.version }}
+          EXPECTED_TAG: ${{ steps.metadata.outputs.tag }}
+          EXPECTED_ASSET: ${{ steps.metadata.outputs.asset }}
+        run: |
+          .venv/bin/python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          asset = Path("dist") / os.environ["EXPECTED_ASSET"]
+          manifest = json.loads(Path("dist/latest.json").read_text(encoding="utf-8"))
+          actual_sha = hashlib.sha256(asset.read_bytes()).hexdigest()
+          expected_url = (
+              "https://github.com/arnoreli53/Syllora/releases/download/"
+              f"{os.environ['EXPECTED_TAG']}/{os.environ['EXPECTED_ASSET']}"
+          )
+          assert asset.is_file(), f"Missing release asset: {asset}"
+          assert manifest["latest_version"] == os.environ["EXPECTED_VERSION"]
+          assert manifest["macos_zip_url"] == expected_url
+          assert manifest["sha256"] == actual_sha
+          PY
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+          RELEASE_ASSET: ${{ steps.metadata.outputs.asset }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            "dist/$RELEASE_ASSET" \
+            "dist/latest.json" \
+            --target "$GITHUB_SHA" \
+            --title "Syllora $RELEASE_VERSION" \
+            --generate-notes \
+            --latest
+
+      - name: Publish manifest for existing installations
+        env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          git fetch origin main
+          git pull --rebase origin main
+          cp dist/latest.json updates/latest.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add updates/latest.json
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Publish update manifest for $RELEASE_VERSION [skip ci]"
+          git push origin HEAD:main

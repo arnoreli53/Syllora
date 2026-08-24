@@ -6,7 +6,17 @@ APP_RELEASE_ARCHIVE_PREFIX = "Syllora"
 APP_SETTINGS_ORG = APP_NAME
 APP_SETTINGS_APP = APP_NAME
 APP_DB_FILENAME = "syllora.sqlite"
-APP_VERSION = "1.0.9"
+BASE_APP_VERSION = "1.0.9"
+
+try:
+    from generated_build_info import BUILD_COMMIT as _BUILD_COMMIT
+    from generated_build_info import BUILD_VERSION as _BUILD_VERSION
+except ImportError:
+    _BUILD_COMMIT = ""
+    _BUILD_VERSION = ""
+
+APP_VERSION = _BUILD_VERSION.strip() or BASE_APP_VERSION
+APP_BUILD_COMMIT = _BUILD_COMMIT.strip()
 
 LEGACY_APP_NAME = "GradeTracker"
 LEGACY_APP_DISPLAY_NAME = "Grade Tracker"
