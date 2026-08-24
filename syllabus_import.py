@@ -1617,6 +1617,10 @@ class OpenAISyllabusExtractor:
         except Exception as exc:
             raise SyllabusExtractionError(str(exc)) from exc
         finally:
+            try:
+                client.close()
+            except Exception:
+                pass
             self._client = None
 
         if not isinstance(payload, dict):

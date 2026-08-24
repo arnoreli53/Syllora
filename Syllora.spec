@@ -16,11 +16,15 @@ if ICON_ICNS.exists():
     shutil.copyfile(ICON_ICNS, ICON_WINDOWED_ICNS)
 
 try:
+    import certifi  # noqa: F401
+    import docx  # noqa: F401
     import openai  # noqa: F401
+    import openpyxl  # noqa: F401
+    import PyPDF2  # noqa: F401
 except ImportError as exc:
     raise SystemExit(
-        "The build environment is missing the 'openai' package. "
-        "Run './.venv/bin/python -m pip install openai' before building."
+        "The build environment is missing a runtime dependency. "
+        "Run './.venv/bin/python -m pip install -r requirements-dev.txt' before building."
     ) from exc
 
 
@@ -34,7 +38,7 @@ a = Analysis(
         ('icon-windowed.icns', '.'),
         ('icon.png', '.'),
     ],
-    hiddenimports=['openai'],
+    hiddenimports=['certifi', 'docx', 'openai', 'openpyxl', 'PyPDF2'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

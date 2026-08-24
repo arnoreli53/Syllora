@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -21,12 +23,14 @@ from PySide6.QtWidgets import QApplication
 import migrate
 import paths
 import updater
+import ui_settings
 import user_profiles
 from db_qt import close_db, open_db
 from ui_courses import list_current_course_completion_state
 from ui_settings import (
     SET_GRADE_CALC_MODE,
     SET_OPENAI_API_KEY,
+    _import_backup_json,
     _set,
     _settings_table_snapshot,
     set_str,
@@ -79,6 +83,38 @@ class DatabaseBehaviorTests(unittest.TestCase):
         snapshot = _settings_table_snapshot()
         self.assertNotIn(SET_OPENAI_API_KEY, snapshot)
         self.assertEqual(snapshot["ordinary_setting"], "kept")
+
+    def test_backup_restore_is_atomic_and_preserves_unknown_due_dates(self) -> None:
+        backup_path = Path(self.temp_dir.name) / "backup.json"
+        backup_path.write_text(
+            json.dumps(
+                {
+                    "courses": [{"name": "Restored Course", "term": "fall", "academic_year_start": 2026}],
+                    "tasks": [{"course": "Restored Course", "item": "Undated task", "due_datetime": ""}],
+                    "previous_courses": [],
+                    "settings": {
+                        SET_OPENAI_API_KEY: "must-not-restore",
+                        "ordinary_setting": "restored",
+                    },
+                    "app_qsettings": {"post_commit_preference": "restored"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.object(ui_settings, "_ensure_course", side_effect=RuntimeError("injected restore failure")):
+            with self.assertRaisesRegex(RuntimeError, "injected restore failure"):
+                _import_backup_json(str(backup_path))
+
+        self.assertEqual(int(scalar("SELECT count(*) FROM courses")), 0)
+        self.assertEqual(int(scalar("SELECT count(*) FROM settings")), 0)
+        self.assertIsNone(ui_settings.app_qsettings().value("post_commit_preference"))
+
+        _import_backup_json(str(backup_path))
+        self.assertEqual(int(scalar("SELECT due_datetime IS NULL FROM tasks WHERE item='Undated task'")), 1)
+        self.assertEqual(int(scalar(f"SELECT count(*) FROM settings WHERE key='{SET_OPENAI_API_KEY}'")), 0)
+        self.assertEqual(scalar("SELECT value FROM settings WHERE key='ordinary_setting'"), "restored")
+        self.assertEqual(ui_settings.app_qsettings().value("post_commit_preference"), "restored")
 
     def test_submitted_without_grade_can_count_as_zero(self) -> None:
         execute(
@@ -141,6 +177,44 @@ class DatabaseBehaviorTests(unittest.TestCase):
 
         self.assertEqual(int(scalar("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('courses','previous_courses')")), 0)
 
+    def test_legacy_task_rebuild_keeps_rows_with_foreign_keys_enabled(self) -> None:
+        close_db()
+        data_dir = Path(self.temp_dir.name)
+        legacy_path = data_dir / "legacy.db"
+        with sqlite3.connect(legacy_path) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE courses (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+                CREATE TABLE tasks (
+                    id INTEGER PRIMARY KEY,
+                    course_id INTEGER NOT NULL,
+                    project_id INTEGER,
+                    item TEXT NOT NULL,
+                    component TEXT DEFAULT '',
+                    due_datetime TEXT,
+                    status TEXT NOT NULL DEFAULT 'not started',
+                    weight REAL,
+                    grade REAL,
+                    ungraded INTEGER NOT NULL DEFAULT 0,
+                    notes TEXT DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE
+                );
+                INSERT INTO courses(id, name) VALUES(1, 'Legacy Course');
+                INSERT INTO tasks(id, course_id, project_id, item) VALUES(1, 1, 99, 'Legacy Task');
+                """
+            )
+
+        paths.set_active_data_paths(legacy_path, data_dir / "legacy.ini")
+        open_db()
+        migrate.ensure_schema()
+
+        columns = {str(row[1]) for row in sqlite3.connect(legacy_path).execute("PRAGMA table_info(tasks)")}
+        self.assertNotIn("project_id", columns)
+        self.assertIn("priority", columns)
+        self.assertEqual(scalar("SELECT item FROM tasks WHERE id=1"), "Legacy Task")
+
 
 class UpdaterSafetyTests(unittest.TestCase):
     def test_manifest_requires_official_release_and_valid_checksum(self) -> None:
@@ -174,6 +248,13 @@ class UpdaterSafetyTests(unittest.TestCase):
             self.assertIn("codesign --verify --deep --strict", script)
             self.assertIn('if ! wait_for_pid "$APP_PID"', script)
             self.assertIn('/bin/rm -rf "$RUNTIME_DIR"', script)
+            syntax_check = subprocess.run(
+                ["/bin/zsh", "-n", str(script_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(syntax_check.returncode, 0, syntax_check.stderr)
 
 
 class UiSmokeTests(unittest.TestCase):

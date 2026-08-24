@@ -291,6 +291,10 @@ class OpenAITranscriptExtractor:
         except Exception as exc:
             raise TranscriptExtractionError(str(exc)) from exc
         finally:
+            try:
+                client.close()
+            except Exception:
+                pass
             self._client = None
 
         if not isinstance(payload, dict):

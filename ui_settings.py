@@ -1674,13 +1674,18 @@ def _import_tasks_from_reader(reader: csv.DictReader) -> tuple[int, int]:
         if due and re.match(r"^\d{4}-\d{2}-\d{2}$", due):
             due_dt = due + " 23:59"
         else:
-            due_dt = due
+            due_dt = due or None
 
         qd = QSqlQuery()
-        qd.prepare("SELECT id FROM tasks WHERE course_id=? AND item=? AND due_datetime=? LIMIT 1")
-        qd.addBindValue(course_id)
-        qd.addBindValue(item)
-        qd.addBindValue(due_dt)
+        if due_dt is None:
+            qd.prepare("SELECT id FROM tasks WHERE course_id=? AND item=? AND due_datetime IS NULL LIMIT 1")
+            qd.addBindValue(course_id)
+            qd.addBindValue(item)
+        else:
+            qd.prepare("SELECT id FROM tasks WHERE course_id=? AND item=? AND due_datetime=? LIMIT 1")
+            qd.addBindValue(course_id)
+            qd.addBindValue(item)
+            qd.addBindValue(due_dt)
         existing_id = None
         if qd.exec() and qd.next():
             existing_id = int(qd.value(0))
@@ -1709,11 +1714,12 @@ def _import_tasks_from_reader(reader: csv.DictReader) -> tuple[int, int]:
 
         qi = QSqlQuery()
         qi.prepare(
-            "INSERT INTO tasks(course_id,item,due_datetime,status,weight,grade,notes,priority,task_type,ungraded) VALUES(?,?,?,?,?,?,?,?,?,?)"
+            "INSERT INTO tasks(course_id,item,due_datetime,due_status,status,weight,grade,notes,priority,task_type,ungraded) VALUES(?,?,?,?,?,?,?,?,?,?,?)"
         )
         qi.addBindValue(course_id)
         qi.addBindValue(item)
         qi.addBindValue(due_dt)
+        qi.addBindValue("exact" if due_dt else "unknown")
         qi.addBindValue(status)
         qi.addBindValue(wv)
         qi.addBindValue(gv)
@@ -1799,14 +1805,7 @@ def _import_courses_from_reader(reader: csv.DictReader) -> tuple[int, int]:
 
 # --- Import single-file backup JSON containing both courses and tasks ---
 @database_transactional
-def _import_backup_json(path: str) -> tuple[int, int, int, int]:
-    """Import a single-file backup JSON containing both courses and tasks.
-    Conflicts are skipped rather than overwritten.
-    Returns (courses_added, courses_skipped, tasks_added, tasks_skipped).
-    """
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
+def _import_backup_database_rows(data: dict) -> tuple[int, int, int, int]:
     if not isinstance(data, dict):
         raise RuntimeError("Backup file is invalid")
 
@@ -1824,15 +1823,6 @@ def _import_backup_json(path: str) -> tuple[int, int, int, int]:
             clean_key = str(key).strip()
             if clean_key and clean_key not in SENSITIVE_SETTING_KEYS:
                 _set(clean_key, "" if value is None else str(value))
-
-    qsettings_rows = data.get("app_qsettings", {})
-    if isinstance(qsettings_rows, dict):
-        settings = app_qsettings()
-        for key, value in qsettings_rows.items():
-            clean_key = str(key).strip()
-            if clean_key:
-                settings.setValue(clean_key, value)
-        settings.sync()
 
     courses_added = 0
     courses_skipped = 0
@@ -1882,8 +1872,9 @@ def _import_backup_json(path: str) -> tuple[int, int, int, int]:
         course = str(row.get("course", "")).strip()
         item = str(row.get("item", "")).strip()
         component = str(row.get("component", "")).strip()
-        due_dt = str(row.get("due_datetime", "")).strip()
-        status = str(row.get("status", get_default_status())).strip().lower() or get_default_status()
+        due_text = str(row.get("due_datetime", "")).strip()
+        due_dt = due_text or None
+        status = normalize_status(row.get("status", get_default_status()) or get_default_status())
         notes = str(row.get("notes", "")).strip()
         task_type = str(row.get("task_type", "") or row.get("type", "")).strip().lower()
         if task_type not in {"", "ungraded", "bonus"}:
@@ -1899,7 +1890,7 @@ def _import_backup_json(path: str) -> tuple[int, int, int, int]:
             task_type = "ungraded"
         if task_type == "ungraded":
             ungraded = 1
-        due_status = normalize_due_status(row.get("due_status", ""), has_due=bool(due_dt))
+        due_status = normalize_due_status(row.get("due_status", ""), has_due=due_dt is not None)
         weight_raw_value = row.get("weight_raw_value", None)
         weight_raw_unit = str(row.get("weight_raw_unit", "")).strip()
         weight_source = normalize_weight_source(row.get("weight_source", ""))
@@ -1911,11 +1902,21 @@ def _import_backup_json(path: str) -> tuple[int, int, int, int]:
         course_id = _ensure_course(course)
 
         qd = QSqlQuery()
-        qd.prepare("SELECT id FROM tasks WHERE course_id=? AND item=? AND ifnull(component,'')=? AND due_datetime=? LIMIT 1")
-        qd.addBindValue(course_id)
-        qd.addBindValue(item)
-        qd.addBindValue(component)
-        qd.addBindValue(due_dt)
+        if due_dt is None:
+            qd.prepare(
+                "SELECT id FROM tasks WHERE course_id=? AND item=? AND ifnull(component,'')=? AND due_datetime IS NULL LIMIT 1"
+            )
+            qd.addBindValue(course_id)
+            qd.addBindValue(item)
+            qd.addBindValue(component)
+        else:
+            qd.prepare(
+                "SELECT id FROM tasks WHERE course_id=? AND item=? AND ifnull(component,'')=? AND due_datetime=? LIMIT 1"
+            )
+            qd.addBindValue(course_id)
+            qd.addBindValue(item)
+            qd.addBindValue(component)
+            qd.addBindValue(due_dt)
         exists = False
         if qd.exec() and qd.next():
             exists = True
@@ -2011,6 +2012,26 @@ def _import_backup_json(path: str) -> tuple[int, int, int, int]:
             raise RuntimeError(qi_prev.lastError().text())
 
     return courses_added, courses_skipped, tasks_added, tasks_skipped
+
+
+def _import_backup_json(path: str) -> tuple[int, int, int, int]:
+    """Restore database rows atomically, then apply non-database preferences."""
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise RuntimeError("Backup file is invalid")
+
+    result = _import_backup_database_rows(data)
+
+    qsettings_rows = data.get("app_qsettings", {})
+    if isinstance(qsettings_rows, dict):
+        settings = app_qsettings()
+        for key, value in qsettings_rows.items():
+            clean_key = str(key).strip()
+            if clean_key:
+                settings.setValue(clean_key, value)
+        settings.sync()
+    return result
 
 
 def import_from_csv(parent: QWidget) -> tuple[int, int, int, int] | None:

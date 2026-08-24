@@ -12,6 +12,18 @@ def _exec(sql: str) -> None:
         raise RuntimeError(q.lastError().text())
 
 
+def _table_columns(table_name: str) -> list[str]:
+    if table_name not in {"courses", "previous_courses", "tasks"}:
+        raise ValueError("Unsupported migration table")
+    query = QSqlQuery()
+    if not query.exec(f"PRAGMA table_info({table_name});"):
+        raise RuntimeError(query.lastError().text())
+    columns: list[str] = []
+    while query.next():
+        columns.append(str(query.value(1)))
+    return columns
+
+
 def _atomic_migration(function):
     @wraps(function)
     def wrapper(*args, **kwargs):
@@ -99,11 +111,7 @@ def ensure_schema() -> None:
         """
     )
 
-    q = QSqlQuery()
-    q.exec("PRAGMA table_info(courses);")
-    course_cols = []
-    while q.next():
-        course_cols.append(str(q.value(1)))
+    course_cols = _table_columns("courses")
 
     if "term" not in course_cols:
         _exec("ALTER TABLE courses ADD COLUMN term TEXT DEFAULT '';")
@@ -128,20 +136,12 @@ def ensure_schema() -> None:
         """
     )
 
-    q = QSqlQuery()
-    q.exec("PRAGMA table_info(previous_courses);")
-    previous_course_cols = []
-    while q.next():
-        previous_course_cols.append(str(q.value(1)))
+    previous_course_cols = _table_columns("previous_courses")
 
     if "final_letter" not in previous_course_cols:
         _exec("ALTER TABLE previous_courses ADD COLUMN final_letter TEXT NOT NULL DEFAULT '';")
 
-    q = QSqlQuery()
-    q.exec("PRAGMA table_info(tasks);")
-    cols = []
-    while q.next():
-        cols.append(str(q.value(1)))  # column name
+    cols = _table_columns("tasks")
 
     if "project_id" in cols:
         # Rebuild tasks without project_id.
@@ -187,10 +187,7 @@ def ensure_schema() -> None:
 
 
     # --- Migration: add priority column if missing ---
-    q.exec("PRAGMA table_info(tasks);")
-    cols = []
-    while q.next():
-        cols.append(str(q.value(1)))  # column name
+    cols = _table_columns("tasks")
 
     if "priority" not in cols:
         # Rebuild tasks to add priority column.
@@ -234,10 +231,7 @@ def ensure_schema() -> None:
         _exec("DROP TABLE tasks;")
         _exec("ALTER TABLE tasks_new RENAME TO tasks;")
 
-    q.exec("PRAGMA table_info(tasks);")
-    cols = []
-    while q.next():
-        cols.append(str(q.value(1)))
+    cols = _table_columns("tasks")
 
     extra_columns = {
         "due_status": "TEXT DEFAULT 'unknown'",

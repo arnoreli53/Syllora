@@ -67,12 +67,13 @@ cd "$ROOT_DIR"
 import importlib.util
 import sys
 
-missing = [name for name in ("openai",) if importlib.util.find_spec(name) is None]
+required = ("PyPDF2", "PySide6", "certifi", "docx", "openai", "openpyxl")
+missing = [name for name in required if importlib.util.find_spec(name) is None]
 if missing:
     names = ", ".join(missing)
     raise SystemExit(
         f"Missing build dependency: {names}. "
-        "Run './.venv/bin/python -m pip install openai' before building."
+        "Run './.venv/bin/python -m pip install -r requirements-dev.txt' before building."
     )
 PY
 
