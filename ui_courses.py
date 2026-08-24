@@ -2564,13 +2564,14 @@ class CoursesPage(QWidget):
             +
             f"""
             QFrame#CoursesListSurface {{
-                background: transparent;
-                border: none;
+                background: {colors['card_bg']};
+                border: 1px solid {colors['border_soft']};
+                border-radius: 18px;
             }}
             QFrame#CoursesGpaPanel {{
                 background: {colors['surface_bg']};
-                border: none;
-                border-radius: 20px;
+                border: 1px solid {colors['border_soft']};
+                border-radius: 18px;
             }}
             QHeaderView::section {{
                 background: {colors['window_alt_bg']};
@@ -2608,7 +2609,7 @@ class CoursesPage(QWidget):
             }}
             QFrame#CoursesGpaStatCard {{
                 background: {colors['surface_alt_bg']};
-                border: none;
+                border: 1px solid {colors['border_soft']};
                 border-radius: 14px;
             }}
             QLabel#CoursesGpaStatTitle {{

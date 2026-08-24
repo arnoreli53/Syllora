@@ -2,7 +2,20 @@ import ctypes
 import sys
 
 from PySide6.QtCore import QCoreApplication, QEvent, Qt, QTimer, QSize
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QTabWidget, QWidget, QVBoxLayout, QSizePolicy
+from PySide6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from db_qt import close_db, open_db
 from migrate import ensure_schema
@@ -12,7 +25,7 @@ from ui_tasks import build_tasks_tab
 from ui_courses import build_courses_tab
 from ui_settings import build_settings_tab, get_theme
 from user_profiles import current_profile, list_profiles, set_current_profile
-from version import APP_DISPLAY_NAME
+from version import APP_DISPLAY_NAME, APP_VERSION
 
 
 def _apply_macos_window_chrome(window: QMainWindow, *, dark: bool) -> None:
@@ -105,7 +118,7 @@ def _apply_macos_window_chrome(window: QMainWindow, *, dark: bool) -> None:
 
 
 class MainWindow(QMainWindow):
-    DESIGN_WINDOW_SIZE = QSize(1180, 760)
+    DESIGN_WINDOW_SIZE = QSize(1280, 800)
     ABSOLUTE_MIN_WINDOW_SIZE = QSize(820, 600)
     SCREEN_EDGE_MARGIN = 40
 
@@ -116,38 +129,83 @@ class MainWindow(QMainWindow):
         self._apply_window_size_constraints()
         self.setMaximumSize(16777215, 16777215)
 
-        # Create a central widget with vertical layout instead of using setMenuWidget
-        # This avoids macOS window locking issues with setMenuWidget
         central = QWidget()
+        central.setObjectName("AppShell")
         central.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
 
-        self.chrome_bar = QWidget()
-        self.chrome_bar.setObjectName("AppChromeBar")
-        self.chrome_bar.setFixedHeight(1)
-        self.chrome_title = QLabel("")
-        self.chrome_title.setObjectName("AppChromeTitle")
-        chrome_layout = QHBoxLayout()
-        chrome_layout.setContentsMargins(16, 0, 16, 0)
-        chrome_layout.addStretch(1)
-        chrome_layout.addWidget(self.chrome_title, 0, Qt.AlignmentFlag.AlignCenter)
-        chrome_layout.addStretch(1)
-        self.chrome_bar.setLayout(chrome_layout)
-        
-        main_layout.addWidget(self.chrome_bar)
+        shell_layout = QHBoxLayout()
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
+
+        self.sidebar = QFrame()
+        self.sidebar.setObjectName("AppSidebar")
+        self.sidebar.setFixedWidth(208)
+        sidebar_layout = QVBoxLayout()
+        sidebar_layout.setContentsMargins(16, 20, 16, 18)
+        sidebar_layout.setSpacing(6)
+
+        brand = QWidget()
+        brand_layout = QHBoxLayout()
+        brand_layout.setContentsMargins(4, 0, 4, 0)
+        brand_layout.setSpacing(10)
+        brand_mark = QLabel("S")
+        brand_mark.setObjectName("BrandMark")
+        brand_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand_mark.setFixedSize(32, 32)
+        brand_name = QLabel(APP_DISPLAY_NAME)
+        brand_name.setObjectName("BrandName")
+        brand_layout.addWidget(brand_mark)
+        brand_layout.addWidget(brand_name)
+        brand_layout.addStretch(1)
+        brand.setLayout(brand_layout)
+        sidebar_layout.addWidget(brand)
+        sidebar_layout.addSpacing(26)
+
+        workspace_label = QLabel("WORKSPACE")
+        workspace_label.setObjectName("SidebarSectionLabel")
+        sidebar_layout.addWidget(workspace_label)
+        sidebar_layout.addSpacing(4)
+
+        self.nav_group = QButtonGroup(self)
+        self.nav_group.setExclusive(True)
+        self.nav_buttons: list[QPushButton] = []
+        for index, label in enumerate(("Overview", "Tasks", "Courses", "Settings")):
+            button = QPushButton(label)
+            button.setObjectName("SidebarNavButton")
+            button.setCheckable(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _checked=False, target=index: self.tab_widget.setCurrentIndex(target))
+            self.nav_group.addButton(button, index)
+            self.nav_buttons.append(button)
+            sidebar_layout.addWidget(button)
+
+        sidebar_layout.addStretch(1)
+        self.sidebar_user = QLabel("Local workspace")
+        self.sidebar_user.setObjectName("SidebarUser")
+        self.sidebar_user.setWordWrap(True)
+        sidebar_layout.addWidget(self.sidebar_user)
+        version_label = QLabel(f"Syllora {APP_VERSION}")
+        version_label.setObjectName("SidebarVersion")
+        sidebar_layout.addWidget(version_label)
+        self.sidebar.setLayout(sidebar_layout)
 
         self.tab_widget = QTabWidget()
         self.tab_widget.setDocumentMode(True)
-        self.tab_widget.tabBar().setExpanding(False)
-        self.tab_widget.tabBar().setDrawBase(False)
-        self.tab_widget.tabBar().setElideMode(Qt.TextElideMode.ElideNone)
+        self.tab_widget.tabBar().hide()
         self.tab_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
-        
-        main_layout.addWidget(self.tab_widget, 1)
-        central.setLayout(main_layout)
+
+        self.workspace = QFrame()
+        self.workspace.setObjectName("AppWorkspace")
+        workspace_layout = QVBoxLayout()
+        workspace_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_layout.setSpacing(0)
+        workspace_layout.addWidget(self.tab_widget, 1)
+        self.workspace.setLayout(workspace_layout)
+
+        shell_layout.addWidget(self.sidebar)
+        shell_layout.addWidget(self.workspace, 1)
+        central.setLayout(shell_layout)
         self.setCentralWidget(central)
 
         self.overview_page = None
@@ -195,6 +253,7 @@ class MainWindow(QMainWindow):
                 break
         self.tab_widget.setCurrentIndex(target_index)
         self.tab_widget.blockSignals(False)
+        self._sync_sidebar_selection(target_index)
 
         if hasattr(self.settings_page, "changed"):
             try:
@@ -231,6 +290,7 @@ class MainWindow(QMainWindow):
         self.apply_app_settings()
 
     def _on_tab_changed(self, index: int) -> None:
+        self._sync_sidebar_selection(index)
         tab = self.tab_widget.tabText(index)
         if tab == "Overview" and self.overview_page is not None and hasattr(self.overview_page, "refresh"):
             self.overview_page.refresh()
@@ -240,6 +300,19 @@ class MainWindow(QMainWindow):
             self.courses_page.refresh()
         if tab == "Settings" and self.settings_page is not None and hasattr(self.settings_page, "load"):
             self.settings_page.load()
+
+    def _sync_sidebar_selection(self, index: int) -> None:
+        for button_index, button in enumerate(self.nav_buttons):
+            button.blockSignals(True)
+            button.setChecked(button_index == index)
+            button.blockSignals(False)
+
+    def _refresh_sidebar_identity(self) -> None:
+        profile = current_profile()
+        if profile is None:
+            self.sidebar_user.setText("Local workspace")
+            return
+        self.sidebar_user.setText(f"{profile.name}\nLocal workspace")
 
     def _apply_window_size_constraints(self) -> None:
         target = QSize(self.DESIGN_WINDOW_SIZE)
@@ -259,16 +332,80 @@ class MainWindow(QMainWindow):
             self.resize(target)
             self._initial_window_size_applied = True
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "sidebar"):
+            self.sidebar.setFixedWidth(184 if self.width() < 1000 else 208)
+
     def apply_app_settings(self) -> None:
         theme = get_theme()
         colors = theme_colors(theme)
         apply_app_theme(QApplication.instance(), theme)
         self.tab_widget.setStyleSheet(main_tab_stylesheet(theme))
-        self.chrome_bar.setVisible(False)
-        self.chrome_bar.setStyleSheet(
-            f"QWidget#AppChromeBar {{ background: {colors['window_alt_bg']}; border-bottom: 1px solid {colors['border']}; }}"
-            f"QLabel#AppChromeTitle {{ color: {colors['text_soft']}; font-weight: 700; font-size: 13px; }}"
+        self.sidebar.setStyleSheet(
+            f"""
+            QFrame#AppSidebar {{
+                background: {colors['panel_bg']};
+                border: none;
+                border-right: 1px solid {colors['border']};
+            }}
+            QLabel#BrandMark {{
+                background: {colors['accent']};
+                color: {colors['accent_text']};
+                border-radius: 9px;
+                font-size: 16px;
+                font-weight: 800;
+            }}
+            QLabel#BrandName {{
+                color: {colors['text_soft']};
+                font-size: 16px;
+                font-weight: 750;
+            }}
+            QLabel#SidebarSectionLabel {{
+                color: {colors['section_text']};
+                font-size: 10px;
+                font-weight: 750;
+                letter-spacing: 1px;
+                padding-left: 9px;
+            }}
+            QPushButton#SidebarNavButton {{
+                background: transparent;
+                color: {colors['muted_text']};
+                border: 1px solid transparent;
+                border-radius: 11px;
+                padding: 10px 13px;
+                text-align: left;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QPushButton#SidebarNavButton:hover {{
+                background: {colors['surface_bg']};
+                color: {colors['text_soft']};
+                border-color: {colors['border_soft']};
+            }}
+            QPushButton#SidebarNavButton:checked {{
+                background: {colors['accent_tint']};
+                color: {colors['text_soft']};
+                border-color: rgba(69, 178, 255, 0.36);
+                font-weight: 700;
+            }}
+            QLabel#SidebarUser {{
+                color: {colors['text']};
+                font-size: 11px;
+                font-weight: 600;
+                padding: 4px 8px 0 8px;
+            }}
+            QLabel#SidebarVersion {{
+                color: {colors['faint_text']};
+                font-size: 10px;
+                padding: 0 8px 2px 8px;
+            }}
+            """
         )
+        self.workspace.setStyleSheet(
+            f"QFrame#AppWorkspace {{ background: {colors['window_bg']}; border: none; }}"
+        )
+        self._refresh_sidebar_identity()
         _apply_macos_window_chrome(self, dark=(theme == "dark"))
         for page in (self.overview_page, self.tasks_page, self.courses_page, self.settings_page):
             if page is None:

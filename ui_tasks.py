@@ -2067,8 +2067,9 @@ class TasksPage(QWidget):
                 +
                 f"""
                 QFrame#Card {{
-                    background: transparent;
-                    border: none;
+                    background: {colors['card_bg']};
+                    border: 1px solid {colors['border_soft']};
+                    border-radius: 18px;
                 }}
                 QTableView {{
                     background: transparent;
@@ -2656,26 +2657,24 @@ class TasksPage(QWidget):
         self.shortcut_duplicate_task = QShortcut(QKeySequence("Shift+D"), self, activated=duplicate_row)
         self.shortcut_delete_task = QShortcut(QKeySequence("Delete"), self, activated=delete_row)
 
-        # Header layout (3 rows: title+buttons, subtitle, filters)
+        # Keep the title and actions on separate rows so the toolbar remains legible
+        # in compact windows and beside the app sidebar.
         row1 = QHBoxLayout()
         row1.setSpacing(12)
         row1.addWidget(title)
         row1.addStretch(1)
 
-        btn_bar = QHBoxLayout()
-        btn_bar.setSpacing(10)
-        btn_bar.addWidget(btn_add)
-        btn_bar.addWidget(btn_duplicate)
-        btn_bar.addWidget(btn_import_syllabus)
-        btn_bar.addWidget(btn_delete)
-        row1.addLayout(btn_bar)
-
         row2 = QHBoxLayout()
         row2.addWidget(subtitle)
         row2.addStretch(1)
-        shortcut_label = QLabel("Add ⇧N  ·  Duplicate ⇧D")
-        shortcut_label.setObjectName("Subtitle")
-        row2.addWidget(shortcut_label)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+        action_row.addWidget(btn_add)
+        action_row.addWidget(btn_duplicate)
+        action_row.addWidget(btn_import_syllabus)
+        action_row.addWidget(btn_delete)
+        action_row.addStretch(1)
 
         row3 = QHBoxLayout()
         row3.setSpacing(10)
@@ -2689,9 +2688,10 @@ class TasksPage(QWidget):
         row3.addStretch(1)
 
         header = QVBoxLayout()
-        header.setSpacing(6)
+        header.setSpacing(8)
         header.addLayout(row1)
         header.addLayout(row2)
+        header.addLayout(action_row)
         header.addLayout(row3)
         banner_row = QHBoxLayout()
         banner_row.setContentsMargins(0, 0, 0, 0)

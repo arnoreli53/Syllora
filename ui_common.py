@@ -102,57 +102,57 @@ def theme_colors(theme: str) -> dict[str, str]:
         "row_selection_border": "#5697FF",
     }
     dark = {
-        "window_bg": "#090E15",
-        "window_alt_bg": "#0C121A",
-        "surface_bg": "#111923",
-        "surface_alt_bg": "#151E29",
-        "card_bg": "#0F1720",
-        "panel_bg": "#0D141D",
-        "header_bg": "#17212C",
-        "input_bg": "#141D27",
-        "input_readonly_bg": "#0D141C",
-        "input_border": "#243343",
-        "input_border_hover": "#38516A",
-        "border": "#1C2937",
-        "border_soft": "rgba(143, 174, 205, 0.12)",
-        "divider": "#202D3B",
-        "text": "#E8EEF5",
-        "text_soft": "#F7F9FC",
-        "muted_text": "#9AAABA",
-        "faint_text": "#687A8C",
-        "section_text": "#7F92A6",
-        "header_text": "#8294A7",
-        "accent": "#58AEFF",
-        "accent_hover": "#76BDFF",
-        "accent_pressed": "#378FDF",
-        "accent_text": "#07121D",
-        "accent_tint": "rgba(88, 174, 255, 0.20)",
-        "secondary_bg": "#151E28",
-        "secondary_bg_hover": "#1B2835",
-        "secondary_bg_pressed": "#101820",
-        "secondary_text": "#E8EEF5",
+        "window_bg": "#070B10",
+        "window_alt_bg": "#0A1017",
+        "surface_bg": "#121C27",
+        "surface_alt_bg": "#182432",
+        "card_bg": "#101923",
+        "panel_bg": "#0C131C",
+        "header_bg": "#1B2A39",
+        "input_bg": "#172432",
+        "input_readonly_bg": "#0D151E",
+        "input_border": "#344A60",
+        "input_border_hover": "#567491",
+        "border": "#2A3C4E",
+        "border_soft": "rgba(157, 190, 222, 0.24)",
+        "divider": "#314457",
+        "text": "#F0F5FA",
+        "text_soft": "#FFFFFF",
+        "muted_text": "#B6C4D2",
+        "faint_text": "#8195A9",
+        "section_text": "#9FB3C7",
+        "header_text": "#A8BED2",
+        "accent": "#45B2FF",
+        "accent_hover": "#74C6FF",
+        "accent_pressed": "#2298E8",
+        "accent_text": "#04111B",
+        "accent_tint": "rgba(69, 178, 255, 0.24)",
+        "secondary_bg": "#1A2836",
+        "secondary_bg_hover": "#24384B",
+        "secondary_bg_pressed": "#13202C",
+        "secondary_text": "#F4F8FC",
         "danger_text": "#FF8E89",
         "danger_border": "rgba(255, 126, 120, 0.34)",
         "danger_bg_hover": "rgba(255, 126, 120, 0.11)",
         "danger_bg_pressed": "rgba(255, 126, 120, 0.17)",
-        "empty_bg": "rgba(143, 174, 205, 0.035)",
-        "empty_border": "rgba(143, 174, 205, 0.20)",
-        "empty_title": "#ECF3FA",
-        "empty_hint": "#8FA0B1",
+        "empty_bg": "rgba(143, 184, 222, 0.07)",
+        "empty_border": "rgba(157, 190, 222, 0.30)",
+        "empty_title": "#F5F9FD",
+        "empty_hint": "#A7B8C8",
         "error_bg": "rgba(87, 30, 35, 0.74)",
         "error_text": "#FFAAA5",
         "error_border": "rgba(255, 126, 120, 0.34)",
         "selection_text": "#FFFFFF",
-        "menu_bg": "#121A23",
-        "menu_border": "#263646",
-        "menu_selected_bg": "rgba(76, 167, 255, 0.18)",
+        "menu_bg": "#141F2B",
+        "menu_border": "#344A60",
+        "menu_selected_bg": "rgba(69, 178, 255, 0.24)",
         "menu_selected_text": "#FFFFFF",
         "shadow": "rgba(0,0,0,0.35)",
         "scrollbar_bg": "rgba(143, 174, 205, 0.06)",
-        "scrollbar_handle": "rgba(143, 174, 205, 0.22)",
-        "row_default_bg": "#131C26",
-        "row_selection_bg": "#182D42",
-        "row_selection_border": "#58AEFF",
+        "scrollbar_handle": "rgba(170, 200, 228, 0.34)",
+        "row_default_bg": "#14202B",
+        "row_selection_bg": "#1C3A53",
+        "row_selection_border": "#45B2FF",
     }
     return light if theme2 == "light" else dark
 
@@ -227,7 +227,7 @@ def common_page_stylesheet(
         QPushButton#SecondaryButton {{
             background: {colors['secondary_bg']};
             color: {colors['secondary_text']};
-            border: 1px solid transparent;
+            border: 1px solid {colors['border_soft']};
             border-radius: 11px;
             padding: 8px 16px;
             font-weight: 600;
@@ -430,7 +430,7 @@ def main_tab_stylesheet(theme: str) -> str:
         QTabWidget::pane {{
             border: none;
             background: transparent;
-            top: 4px;
+            top: 0px;
         }}
         QTabBar {{
             alignment: center;

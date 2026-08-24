@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QScrollArea,
+    QTabWidget,
 )
 import os
 import json
@@ -2432,7 +2433,7 @@ class SettingsPage(QWidget):
         version_label = make_version_label()
 
         self.cmb_current_user = QComboBox()
-        self.cmb_current_user.setMinimumWidth(220)
+        self.cmb_current_user.setMinimumWidth(150)
         self.cmb_current_user.currentIndexChanged.connect(self._on_current_user_changed)
         self.btn_modify_users = QPushButton("Modify users...")
         self.btn_modify_users.setObjectName("SecondaryButton")
@@ -2790,13 +2791,13 @@ class SettingsPage(QWidget):
         self.footer_note.setObjectName("FooterNote")
         self.footer_note.setWordWrap(True)
 
-        left_label_width = 190
+        left_label_width = 155
         right_label_width = 135
-        left_input_width = 280
-        left_compound_width = 350
-        right_input_width = 230
-        right_compound_width = 350
-        compact_input_width = 220
+        left_input_width = 220
+        left_compound_width = 300
+        right_input_width = 210
+        right_compound_width = 300
+        compact_input_width = 200
 
         user_section = _build_section(
             "USER",
@@ -2891,18 +2892,6 @@ class SettingsPage(QWidget):
             ],
         )
 
-        left_panel = QFrame()
-        left_panel.setObjectName("Panel")
-        lp = QVBoxLayout()
-        lp.setContentsMargins(0, 0, 0, 0)
-        lp.setSpacing(12)
-        lp.addWidget(user_section)
-        lp.addWidget(defaults_section)
-        lp.addWidget(overview_section)
-        lp.addWidget(grades_section)
-        lp.addStretch(1)
-        left_panel.setLayout(lp)
-
         display_section = _build_section(
             "DISPLAY",
             [
@@ -2968,25 +2957,30 @@ class SettingsPage(QWidget):
             ],
         )
 
-        right_panel = QFrame()
-        right_panel.setObjectName("Panel")
-        rp = QVBoxLayout()
-        rp.setContentsMargins(0, 0, 0, 0)
-        rp.setSpacing(12)
-        rp.addWidget(display_section)
-        rp.addWidget(courses_section)
-        rp.addWidget(backup_section)
-        rp.addWidget(app_section)
-        rp.addStretch(1)
-        right_panel.setLayout(rp)
+        def _category_page(*sections: QWidget) -> QWidget:
+            page = QWidget()
+            page.setObjectName("SettingsCategoryPage")
+            layout = QVBoxLayout()
+            layout.setContentsMargins(0, 14, 0, 0)
+            layout.setSpacing(12)
+            for section in sections:
+                layout.addWidget(section)
+            layout.addStretch(1)
+            page.setLayout(layout)
+            return page
 
-        panels_row = QHBoxLayout()
-        panels_row.setSpacing(14)
-        panels_row.addWidget(left_panel, 1)
-        panels_row.addWidget(right_panel, 1)
-        self._settings_panels_layout = panels_row
-        self._settings_left_panel = left_panel
-        self._settings_right_panel = right_panel
+        category_tabs = QTabWidget()
+        category_tabs.setObjectName("SettingsCategories")
+        category_tabs.setDocumentMode(True)
+        category_tabs.tabBar().setObjectName("SettingsCategoryBar")
+        category_tabs.tabBar().setExpanding(True)
+        category_tabs.tabBar().setDrawBase(False)
+        category_tabs.addTab(_category_page(user_section, defaults_section, display_section), "General")
+        category_tabs.addTab(_category_page(overview_section, courses_section), "Overview")
+        category_tabs.addTab(_category_page(grades_section), "Grades")
+        category_tabs.addTab(_category_page(backup_section, app_section), "Data + App")
+        category_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self._settings_category_tabs = category_tabs
 
         header_left = QVBoxLayout()
         header_left.setSpacing(2)
@@ -3003,7 +2997,7 @@ class SettingsPage(QWidget):
         card_layout = QVBoxLayout()
         card_layout.setContentsMargins(0, 0, 0, 0)
         card_layout.setSpacing(0)
-        card_layout.addLayout(panels_row)
+        card_layout.addWidget(category_tabs)
         card.setLayout(card_layout)
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self._settings_card = card
@@ -3026,11 +3020,10 @@ class SettingsPage(QWidget):
         self._settings_content = settings_content
 
         root = QVBoxLayout()
-        root.setContentsMargins(18, 16, 18, 14)
-        root.setSpacing(10)
+        root.setContentsMargins(28, 24, 28, 24)
+        root.setSpacing(16)
         root.addLayout(header)
         root.addWidget(settings_scroll, 1)
-        root.addWidget(self.footer_note)
         self.setLayout(root)
 
         self.cmb_grade_display.currentTextChanged.connect(self._update_grade_scale_button_visibility)
@@ -3041,20 +3034,16 @@ class SettingsPage(QWidget):
         QTimer.singleShot(0, self._apply_responsive_layout)
 
     def _apply_responsive_layout(self) -> None:
-        layout = getattr(self, "_settings_panels_layout", None)
         card = getattr(self, "_settings_card", None)
-        if layout is None or card is None:
+        if card is None:
             return
 
-        stacked = self.width() < 1240
         viewport_width = self._settings_scroll.viewport().width()
-        available_width = viewport_width if viewport_width > 100 else max(560, self.width() - 36)
-        card.setFixedWidth(min(960, available_width) if stacked else available_width)
-        direction = QBoxLayout.Direction.TopToBottom if stacked else QBoxLayout.Direction.LeftToRight
-        if layout.direction() != direction:
-            layout.setDirection(direction)
+        available_width = viewport_width if viewport_width > 100 else max(520, self.width() - 36)
+        card_width = max(440, min(780, available_width))
+        card.setFixedWidth(card_width)
 
-        grid_columns = 1 if self.width() < 900 else 2
+        grid_columns = 2 if card_width >= 680 else 1
         if getattr(self, "_settings_grid_columns", None) != grid_columns:
             self._settings_grid_columns = grid_columns
             for grid in self._settings_switch_grids:
@@ -3066,14 +3055,7 @@ class SettingsPage(QWidget):
                     grid.addWidget(widget, index // grid_columns, index % grid_columns)
                 grid.setColumnStretch(0, 1)
                 grid.setColumnStretch(1, 1 if grid_columns == 2 else 0)
-        layout.activate()
-
-        if stacked:
-            left_height = self._settings_left_panel.sizeHint().height()
-            right_height = self._settings_right_panel.sizeHint().height()
-            card.setMinimumHeight(left_height + right_height + layout.spacing() + 24)
-        else:
-            card.setMinimumHeight(0)
+        card.setMinimumHeight(0)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -3105,8 +3087,38 @@ class SettingsPage(QWidget):
             }}
             QFrame#SettingsSection {{
                 background: {colors['card_bg']};
-                border: none;
+                border: 1px solid {colors['border_soft']};
                 border-radius: 16px;
+            }}
+            QTabWidget#SettingsCategories::pane {{
+                background: transparent;
+                border: none;
+            }}
+            QTabBar#SettingsCategoryBar {{
+                background: {colors['surface_bg']};
+                border: 1px solid {colors['border_soft']};
+                border-radius: 13px;
+            }}
+            QTabBar#SettingsCategoryBar::tab {{
+                background: transparent;
+                color: {colors['muted_text']};
+                border: none;
+                border-radius: 10px;
+                padding: 9px 14px;
+                margin: 3px;
+                font-weight: 650;
+            }}
+            QTabBar#SettingsCategoryBar::tab:hover {{
+                background: {colors['secondary_bg_hover']};
+                color: {colors['text_soft']};
+            }}
+            QTabBar#SettingsCategoryBar::tab:selected {{
+                background: {colors['accent_tint']};
+                color: {colors['text_soft']};
+            }}
+            QLabel#Section {{
+                color: {colors['section_text']};
+                font-weight: 750;
             }}
             QLabel#SettingLabel {{
                 color: {colors['text_soft']};

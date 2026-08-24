@@ -534,6 +534,8 @@ class OverviewEmptyState(QFrame):
     def __init__(self, title: str, detail: str, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("EmptyStateCard")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumHeight(112)
 
         self.title_label = QLabel(title)
         self.title_label.setObjectName("OverviewEmptyTitle")
@@ -545,12 +547,10 @@ class OverviewEmptyState(QFrame):
         self.detail_label.setWordWrap(True)
 
         layout = QVBoxLayout()
-        layout.setContentsMargins(24, 30, 24, 30)
+        layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(6)
-        layout.addStretch(1)
         layout.addWidget(self.title_label)
         layout.addWidget(self.detail_label)
-        layout.addStretch(1)
         self.setLayout(layout)
 
 
@@ -589,8 +589,10 @@ class OverviewPage(QWidget):
             self._tray_icon.setVisible(True)
         self._last_reminder_notification: str | None = None
 
-        title = QLabel("Upcoming Assessments")
+        title = QLabel("Overview")
         title.setObjectName("Title")
+        subtitle = QLabel("A focused look at what needs your attention.")
+        subtitle.setObjectName("Subtitle")
 
         self.btn_refresh = QPushButton("Refresh")
         self.btn_refresh.setObjectName("PrimaryButton")
@@ -602,8 +604,9 @@ class OverviewPage(QWidget):
         self.btn_quick_add.clicked.connect(self._open_quick_add_dialog)
 
         left = QVBoxLayout()
-        left.setSpacing(0)
+        left.setSpacing(3)
         left.addWidget(title)
+        left.addWidget(subtitle)
 
         top = QHBoxLayout()
         top.addLayout(left)
@@ -653,6 +656,8 @@ class OverviewPage(QWidget):
         self.attention_scroll.setWidgetResizable(True)
         self.attention_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.attention_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.attention_scroll.setMinimumHeight(118)
+        self.attention_scroll.setMaximumHeight(360)
         self.attention_container = QWidget()
         self.attention_layout = QVBoxLayout()
         self.attention_layout.setContentsMargins(0, 0, 0, 0)
@@ -662,7 +667,7 @@ class OverviewPage(QWidget):
 
         grades_card = QFrame()
         grades_card.setObjectName("OverviewSideSurface")
-        grades_card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        grades_card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Maximum)
         grades_card.setMinimumWidth(260)
         grades_card.setMaximumWidth(320)
         self.grades_card = grades_card
@@ -678,10 +683,11 @@ class OverviewPage(QWidget):
         grades_layout.addWidget(self.grades_empty)
         grades_layout.addWidget(self.grades_panel_divider)
         grades_layout.addWidget(self.grades_panel_heading)
-        grades_layout.addWidget(self.attention_scroll, 1)
+        grades_layout.addWidget(self.attention_scroll)
         grades_card.setLayout(grades_layout)
 
         self.table = QTableView()
+        self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.table.setModel(self.model)
@@ -815,29 +821,48 @@ class OverviewPage(QWidget):
 
         upcoming_card = QFrame()
         upcoming_card.setObjectName("OverviewListSurface")
+        upcoming_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        self.upcoming_card = upcoming_card
+        upcoming_heading = QLabel("Upcoming assessments")
+        upcoming_heading.setObjectName("OverviewCardTitle")
         self.upcoming_empty = OverviewEmptyState(
             "No upcoming assignments",
             "Tasks with upcoming due dates will appear here automatically.",
         )
         card_layout = QVBoxLayout()
-        card_layout.setContentsMargins(12, 12, 12, 12)
-        card_layout.setSpacing(8)
+        card_layout.setContentsMargins(16, 15, 16, 16)
+        card_layout.setSpacing(10)
+        card_layout.addWidget(upcoming_heading)
         card_layout.addWidget(header_bar)
         card_layout.addWidget(self.table)
         card_layout.addWidget(self.upcoming_empty)
         upcoming_card.setLayout(card_layout)
 
         main = QHBoxLayout()
-        main.setSpacing(14)
-        main.addWidget(upcoming_card, 1)
-        main.addWidget(grades_card)
+        main.setSpacing(16)
+        main.addWidget(upcoming_card, 1, Qt.AlignmentFlag.AlignTop)
+        main.addWidget(grades_card, 0, Qt.AlignmentFlag.AlignTop)
 
         root = QVBoxLayout()
-        root.setContentsMargins(18, 16, 18, 18)
-        root.setSpacing(14)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(18)
         root.addLayout(top)
         root.addLayout(main)
-        self.setLayout(root)
+        root.addStretch(1)
+
+        content = QWidget()
+        content.setObjectName("OverviewContent")
+        content.setMaximumWidth(1180)
+        content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        content.setLayout(root)
+
+        shell = QHBoxLayout()
+        shell.setContentsMargins(28, 24, 28, 24)
+        shell.setSpacing(0)
+        shell.addStretch(1)
+        shell.addWidget(content, 1, Qt.AlignmentFlag.AlignTop)
+        shell.addStretch(1)
+        self.setLayout(shell)
 
         self.apply_settings()
         self.refresh()
@@ -1110,6 +1135,8 @@ class OverviewPage(QWidget):
         glance_days = max(1, min(7, int(upcoming_days)))
 
         if not rows:
+            self.attention_scroll.setMinimumHeight(112)
+            self.attention_scroll.setMaximumHeight(112)
             self.attention_layout.addWidget(
                 self._build_glance_card(
                     "Nothing pressing right now",
@@ -1119,6 +1146,9 @@ class OverviewPage(QWidget):
             )
             self.attention_layout.addStretch(1)
             return
+
+        self.attention_scroll.setMinimumHeight(180)
+        self.attention_scroll.setMaximumHeight(360)
 
         hero_title, hero_lines = self._build_week_snapshot(rows, now, glance_days)
         self.attention_layout.addWidget(
@@ -1159,13 +1189,14 @@ class OverviewPage(QWidget):
             +
             f"""
             QFrame#OverviewListSurface {{
-                background: transparent;
-                border: none;
+                background: {colors['card_bg']};
+                border: 1px solid {colors['border_soft']};
+                border-radius: 18px;
             }}
             QFrame#OverviewSideSurface {{
                 background: {colors['card_bg']};
-                border: none;
-                border-radius: 20px;
+                border: 1px solid {colors['border_soft']};
+                border-radius: 18px;
             }}
             QFrame#HeaderBar {{
                 background: transparent;
@@ -1174,8 +1205,14 @@ class OverviewPage(QWidget):
                 border-radius: 0px;
             }}
             QFrame#EmptyStateCard {{
-                background: transparent;
-                border: none;
+                background: {colors['empty_bg']};
+                border: 1px solid {colors['empty_border']};
+                border-radius: 14px;
+            }}
+            QLabel#OverviewCardTitle {{
+                color: {colors['text_soft']};
+                font-size: 14px;
+                font-weight: 750;
             }}
             QLabel#OverviewEmptyTitle {{
                 color: {colors['empty_title']};
@@ -1198,12 +1235,12 @@ class OverviewPage(QWidget):
             }}
             QFrame#OverviewGlanceCard, QFrame#OverviewGlanceHeroCard {{
                 background: {colors['surface_alt_bg']};
-                border: none;
+                border: 1px solid {colors['border_soft']};
                 border-radius: 14px;
             }}
             QFrame#OverviewGlanceHeroCard {{
                 background: {colors['surface_bg']};
-                border: none;
+                border: 1px solid {colors['border_soft']};
             }}
             QLabel#OverviewGlanceSectionLabel {{
                 color: {colors['muted_text']};
@@ -1296,6 +1333,11 @@ class OverviewPage(QWidget):
         has_upcoming = self.model.rowCount() > 0
         self.table.setVisible(has_upcoming)
         self.upcoming_empty.setVisible(not has_upcoming)
+        if has_upcoming:
+            row_height = max(40, self.table.verticalHeader().defaultSectionSize())
+            visible_rows = min(self.model.rowCount(), 9)
+            self.table.setMinimumHeight((visible_rows * row_height) + 8)
+            self.table.setMaximumHeight((visible_rows * row_height) + 8)
 
         has_grades = self.grades_model.rowCount() > 0
         self.grades_table.setVisible(has_grades)
