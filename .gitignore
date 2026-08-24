@@ -1,0 +1,18 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.spec.bak
+*.log
+
+# Local app data and transient updater files
+gradetracker.db
+syllora.sqlite
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+updates/
+
