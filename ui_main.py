@@ -2,7 +2,7 @@ import ctypes
 import sys
 
 from PySide6.QtCore import QCoreApplication, QEvent, Qt, QTimer, QSize
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtGui import QFontMetrics, QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from db_qt import close_db, open_db
 from migrate import ensure_schema
+from paths import resolve_app_icon_path
 from ui_common import apply_app_theme, main_tab_stylesheet, theme_colors
 from ui_overview import build_overview_tab
 from ui_tasks import build_tasks_tab
@@ -27,6 +28,35 @@ from ui_courses import build_courses_tab
 from ui_settings import build_settings_tab, get_theme
 from user_profiles import current_profile, list_profiles, set_current_profile
 from version import APP_DISPLAY_NAME, APP_VERSION
+
+
+def _rounded_brand_icon_pixmap(size: int, radius: int) -> QPixmap | None:
+    """The real app icon, scaled and corner-rounded to sit in the header like the old badge did."""
+    icon_path = resolve_app_icon_path()
+    if icon_path is None:
+        return None
+    source = QIcon(str(icon_path)).pixmap(size, size)
+    if source.isNull():
+        source = QPixmap(str(icon_path))
+    if source.isNull():
+        return None
+    source = source.scaled(
+        size,
+        size,
+        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+
+    rounded = QPixmap(size, size)
+    rounded.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(rounded)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    path = QPainterPath()
+    path.addRoundedRect(0, 0, size, size, radius, radius)
+    painter.setClipPath(path)
+    painter.drawPixmap(0, 0, source)
+    painter.end()
+    return rounded
 
 
 def _apply_macos_window_chrome(window: QMainWindow, *, dark: bool) -> None:
@@ -149,10 +179,16 @@ class MainWindow(QMainWindow):
         brand_layout = QHBoxLayout()
         brand_layout.setContentsMargins(0, 0, 0, 0)
         brand_layout.setSpacing(10)
-        brand_mark = QLabel("S")
+        brand_mark = QLabel()
         brand_mark.setObjectName("BrandMark")
         brand_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
         brand_mark.setFixedSize(34, 34)
+        icon_pixmap = _rounded_brand_icon_pixmap(68, 20)
+        if icon_pixmap is not None:
+            icon_pixmap.setDevicePixelRatio(2.0)
+            brand_mark.setPixmap(icon_pixmap)
+        else:
+            brand_mark.setText("S")
         brand_name = QLabel(APP_DISPLAY_NAME)
         brand_name.setObjectName("BrandName")
         brand_layout.addWidget(brand_mark)
