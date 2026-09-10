@@ -2,6 +2,7 @@ import ctypes
 import sys
 
 from PySide6.QtCore import QCoreApplication, QEvent, Qt, QTimer, QSize
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -133,20 +134,20 @@ class MainWindow(QMainWindow):
         central.setObjectName("AppShell")
         central.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        shell_layout = QHBoxLayout()
+        shell_layout = QVBoxLayout()
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
 
-        self.sidebar = QFrame()
-        self.sidebar.setObjectName("AppSidebar")
-        self.sidebar.setFixedWidth(208)
-        sidebar_layout = QVBoxLayout()
-        sidebar_layout.setContentsMargins(16, 20, 16, 18)
-        sidebar_layout.setSpacing(6)
+        self.header = QFrame()
+        self.header.setObjectName("AppHeader")
+        self.header.setFixedHeight(60)
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(22, 0, 22, 0)
+        header_layout.setSpacing(28)
 
         brand = QWidget()
         brand_layout = QHBoxLayout()
-        brand_layout.setContentsMargins(4, 0, 4, 0)
+        brand_layout.setContentsMargins(0, 0, 0, 0)
         brand_layout.setSpacing(10)
         brand_mark = QLabel("S")
         brand_mark.setObjectName("BrandMark")
@@ -156,38 +157,40 @@ class MainWindow(QMainWindow):
         brand_name.setObjectName("BrandName")
         brand_layout.addWidget(brand_mark)
         brand_layout.addWidget(brand_name, 0, Qt.AlignmentFlag.AlignVCenter)
-        brand_layout.addStretch(1)
         brand.setLayout(brand_layout)
-        sidebar_layout.addWidget(brand)
-        sidebar_layout.addSpacing(26)
+        header_layout.addWidget(brand)
 
-        workspace_label = QLabel("WORKSPACE")
-        workspace_label.setObjectName("SidebarSectionLabel")
-        sidebar_layout.addWidget(workspace_label)
-        sidebar_layout.addSpacing(4)
-
+        nav_row = QHBoxLayout()
+        nav_row.setSpacing(4)
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
         self.nav_buttons: list[QPushButton] = []
+        # Reserve enough width for each label plus its padding up front so the
+        # layout never has to shrink a button below a readable size.
+        nav_metrics = QFontMetrics(self.font())
         for index, label in enumerate(("Overview", "Tasks", "Courses", "Settings")):
             button = QPushButton(label)
-            button.setObjectName("SidebarNavButton")
+            button.setObjectName("HeaderNavButton")
             button.setCheckable(True)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setMinimumWidth(nav_metrics.horizontalAdvance(label) + 48)
             button.clicked.connect(lambda _checked=False, target=index: self.tab_widget.setCurrentIndex(target))
             self.nav_group.addButton(button, index)
             self.nav_buttons.append(button)
-            sidebar_layout.addWidget(button)
+            nav_row.addWidget(button)
+        header_layout.addLayout(nav_row)
 
-        sidebar_layout.addStretch(1)
-        self.sidebar_user = QLabel("Local workspace")
-        self.sidebar_user.setObjectName("SidebarUser")
-        self.sidebar_user.setWordWrap(True)
-        sidebar_layout.addWidget(self.sidebar_user)
-        version_label = QLabel(f"Syllora {APP_VERSION}")
-        version_label.setObjectName("SidebarVersion")
-        sidebar_layout.addWidget(version_label)
-        self.sidebar.setLayout(sidebar_layout)
+        header_layout.addStretch(1)
+
+        self.header_user = QLabel("Local workspace")
+        self.header_user.setObjectName("HeaderUser")
+        header_layout.addWidget(self.header_user)
+
+        self.version_label = QLabel(f"Syllora {APP_VERSION}")
+        self.version_label.setObjectName("HeaderVersion")
+        header_layout.addWidget(self.version_label)
+
+        self.header.setLayout(header_layout)
 
         self.tab_widget = QTabWidget()
         self.tab_widget.setDocumentMode(True)
@@ -203,7 +206,7 @@ class MainWindow(QMainWindow):
         workspace_layout.addWidget(self.tab_widget, 1)
         self.workspace.setLayout(workspace_layout)
 
-        shell_layout.addWidget(self.sidebar)
+        shell_layout.addWidget(self.header)
         shell_layout.addWidget(self.workspace, 1)
         central.setLayout(shell_layout)
         self.setCentralWidget(central)
@@ -309,10 +312,12 @@ class MainWindow(QMainWindow):
 
     def _refresh_sidebar_identity(self) -> None:
         profile = current_profile()
-        if profile is None:
-            self.sidebar_user.setText("Local workspace")
-            return
-        self.sidebar_user.setText(f"{profile.name}\nLocal workspace")
+        full_text = "Local workspace" if profile is None else f"{profile.name} · Local workspace"
+        # Elide rather than letting a long profile name overflow into the nav
+        # buttons or version label next to it.
+        elided = QFontMetrics(self.header_user.font()).elidedText(full_text, Qt.TextElideMode.ElideRight, 260)
+        self.header_user.setText(elided)
+        self.header_user.setToolTip(full_text)
 
     def _apply_window_size_constraints(self) -> None:
         target = QSize(self.DESIGN_WINDOW_SIZE)
@@ -334,20 +339,24 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if hasattr(self, "sidebar"):
-            self.sidebar.setFixedWidth(184 if self.width() < 1000 else 208)
+        # At the narrow end of the supported window range, drop the least
+        # essential header content first so the nav buttons never get squeezed.
+        if hasattr(self, "version_label"):
+            self.version_label.setVisible(self.width() >= 940)
+        if hasattr(self, "header_user"):
+            self.header_user.setVisible(self.width() >= 860)
 
     def apply_app_settings(self) -> None:
         theme = get_theme()
         colors = theme_colors(theme)
         apply_app_theme(QApplication.instance(), theme)
         self.tab_widget.setStyleSheet(main_tab_stylesheet(theme))
-        self.sidebar.setStyleSheet(
+        self.header.setStyleSheet(
             f"""
-            QFrame#AppSidebar {{
+            QFrame#AppHeader {{
                 background: {colors['panel_bg']};
                 border: none;
-                border-right: 1px solid {colors['border']};
+                border-bottom: 1px solid {colors['border']};
             }}
             QLabel#BrandMark {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {colors['accent_hover']}, stop:1 {colors['accent']});
@@ -364,44 +373,34 @@ class MainWindow(QMainWindow):
                 font-weight: 750;
                 letter-spacing: -0.2px;
             }}
-            QLabel#SidebarSectionLabel {{
-                color: {colors['section_text']};
-                font-size: 10px;
-                font-weight: 750;
-                letter-spacing: 1px;
-                padding-left: 9px;
-            }}
-            QPushButton#SidebarNavButton {{
+            QPushButton#HeaderNavButton {{
                 background: transparent;
                 color: {colors['muted_text']};
                 border: 1px solid transparent;
-                border-radius: 11px;
-                padding: 10px 13px;
-                text-align: left;
+                border-radius: 9px;
+                padding: 8px 16px;
+                text-align: center;
                 font-size: 13px;
                 font-weight: 600;
             }}
-            QPushButton#SidebarNavButton:hover {{
+            QPushButton#HeaderNavButton:hover {{
                 background: {colors['surface_bg']};
                 color: {colors['text_soft']};
                 border-color: {colors['border_soft']};
             }}
-            QPushButton#SidebarNavButton:checked {{
+            QPushButton#HeaderNavButton:checked {{
                 background: {colors['accent_tint']};
                 color: {colors['text_soft']};
                 border-color: rgba(69, 178, 255, 0.36);
-                font-weight: 700;
             }}
-            QLabel#SidebarUser {{
+            QLabel#HeaderUser {{
                 color: {colors['text']};
-                font-size: 11px;
+                font-size: 12px;
                 font-weight: 600;
-                padding: 4px 8px 0 8px;
             }}
-            QLabel#SidebarVersion {{
+            QLabel#HeaderVersion {{
                 color: {colors['faint_text']};
                 font-size: 10px;
-                padding: 0 8px 2px 8px;
             }}
             """
         )

@@ -540,6 +540,7 @@ class OverviewEmptyState(QFrame):
         self.title_label = QLabel(title)
         self.title_label.setObjectName("OverviewEmptyTitle")
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_label.setWordWrap(True)
 
         self.detail_label = QLabel(detail)
         self.detail_label.setObjectName("OverviewEmptyHint")
@@ -852,15 +853,20 @@ class OverviewPage(QWidget):
 
         content = QWidget()
         content.setObjectName("OverviewContent")
-        content.setMaximumWidth(1180)
+        content.setMaximumWidth(1520)
         content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         content.setLayout(root)
 
         shell = QHBoxLayout()
         shell.setContentsMargins(28, 24, 28, 24)
         shell.setSpacing(0)
+        # The flanking stretches only need to soak up space once `content` has
+        # already hit its maximum width; giving content a far higher stretch
+        # factor (instead of an equal 1) makes it claim all available width
+        # up to that cap before the spacers take anything, so the page fills
+        # the window instead of being squeezed to a fraction of it.
         shell.addStretch(1)
-        shell.addWidget(content, 1, Qt.AlignmentFlag.AlignTop)
+        shell.addWidget(content, 1000, Qt.AlignmentFlag.AlignTop)
         shell.addStretch(1)
         self.setLayout(shell)
 
@@ -1509,7 +1515,8 @@ class OverviewPage(QWidget):
             return
         available = max(640, viewport_width if viewport_width > 100 else self.width() - 48) - 12
         course_width = 130 if available >= 760 else 110
-        due_width = 170 if available >= 760 else 150
+        # Wide enough for the longest formatted date ("Wednesday, September 23rd").
+        due_width = 240 if available >= 760 else 205
         badge_width = 74 if available >= 760 else 62
         submit_width = 120 if available >= 760 else 106
         assessment_width = max(190, available - course_width - due_width - badge_width - submit_width)

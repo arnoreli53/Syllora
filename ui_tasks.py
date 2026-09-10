@@ -936,19 +936,24 @@ class DueDateTimeDelegate(QStyledItemDelegate):
         w.setDisplayFormat(self.DISPLAY_FMT)
         style_inline_datetime_editor(w)
         mark_delegate_editor(w, index)
-        # Land on the month segment: the year rarely needs changing task-to-task,
-        # so skip straight past it instead of making users tab/arrow over it.
-        QTimer.singleShot(0, lambda w=w: self._focus_month_section(w))
         return w
 
     @staticmethod
     def _focus_month_section(editor: QDateTimeEdit) -> None:
         try:
+            # Land on the month segment: the year rarely needs changing
+            # task-to-task, so skip straight past it.
             editor.setCurrentSectionIndex(DueDateTimeDelegate.MONTH_SECTION_INDEX)
         except RuntimeError:
             pass
 
     def eventFilter(self, editor, event):
+        if event.type() == QEvent.Type.FocusIn:
+            # Defer past this focus-in: the widget's own default handling
+            # (select-first-section-on-focus) runs right after we return, and
+            # would otherwise clobber our section choice if we set it inline.
+            QTimer.singleShot(0, lambda editor=editor: self._focus_month_section(editor))
+            return super().eventFilter(editor, event)
         if (
             self._tab_target_column != -1
             and event.type() == QEvent.Type.KeyPress
