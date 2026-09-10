@@ -189,6 +189,10 @@ class MainWindow(QMainWindow):
             brand_mark.setPixmap(icon_pixmap)
         else:
             brand_mark.setText("S")
+        # The real icon paints its own background; only the "S" fallback needs
+        # the accent badge styling behind it (see BrandMark[hasIcon] in the
+        # header stylesheet below).
+        brand_mark.setProperty("hasIcon", icon_pixmap is not None)
         brand_name = QLabel(APP_DISPLAY_NAME)
         brand_name.setObjectName("BrandName")
         brand_layout.addWidget(brand_mark)
@@ -394,7 +398,7 @@ class MainWindow(QMainWindow):
                 border: none;
                 border-bottom: 1px solid {colors['border']};
             }}
-            QLabel#BrandMark {{
+            QLabel#BrandMark[hasIcon="false"] {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {colors['accent_hover']}, stop:1 {colors['accent']});
                 color: {colors['accent_text']};
                 border: 1px solid rgba(255, 255, 255, 0.22);
