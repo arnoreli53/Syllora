@@ -151,11 +151,11 @@ class MainWindow(QMainWindow):
         brand_mark = QLabel("S")
         brand_mark.setObjectName("BrandMark")
         brand_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        brand_mark.setFixedSize(32, 32)
+        brand_mark.setFixedSize(34, 34)
         brand_name = QLabel(APP_DISPLAY_NAME)
         brand_name.setObjectName("BrandName")
         brand_layout.addWidget(brand_mark)
-        brand_layout.addWidget(brand_name)
+        brand_layout.addWidget(brand_name, 0, Qt.AlignmentFlag.AlignVCenter)
         brand_layout.addStretch(1)
         brand.setLayout(brand_layout)
         sidebar_layout.addWidget(brand)
@@ -350,16 +350,19 @@ class MainWindow(QMainWindow):
                 border-right: 1px solid {colors['border']};
             }}
             QLabel#BrandMark {{
-                background: {colors['accent']};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {colors['accent_hover']}, stop:1 {colors['accent']});
                 color: {colors['accent_text']};
-                border-radius: 9px;
+                border: 1px solid rgba(255, 255, 255, 0.22);
+                border-radius: 10px;
                 font-size: 16px;
                 font-weight: 800;
+                padding-bottom: 1px;
             }}
             QLabel#BrandName {{
                 color: {colors['text_soft']};
                 font-size: 16px;
                 font-weight: 750;
+                letter-spacing: -0.2px;
             }}
             QLabel#SidebarSectionLabel {{
                 color: {colors['section_text']};

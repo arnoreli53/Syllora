@@ -896,6 +896,13 @@ class DueDateTimeDelegate(QStyledItemDelegate):
     DISPLAY_FMT = "yyyy-MM-dd"            # what the user sees/edits
     STORE_FMT = "yyyy-MM-dd HH:mm"        # what we store in SQLite
     DEFAULT_DUE_TIME = QTime(23, 59)
+    MONTH_SECTION_INDEX = 1                # index of the month segment in DISPLAY_FMT
+
+    def __init__(self, parent=None, tab_target_column: int = -1):
+        super().__init__(parent)
+        # Keyboard flow: Tab out of the due-date editor jumps straight to this
+        # column (Weight), skipping the click-only Status cell in between.
+        self._tab_target_column = tab_target_column
 
     def paint(self, painter, option, index):
         view = self.parent()
@@ -929,7 +936,36 @@ class DueDateTimeDelegate(QStyledItemDelegate):
         w.setDisplayFormat(self.DISPLAY_FMT)
         style_inline_datetime_editor(w)
         mark_delegate_editor(w, index)
+        # Land on the month segment: the year rarely needs changing task-to-task,
+        # so skip straight past it instead of making users tab/arrow over it.
+        QTimer.singleShot(0, lambda w=w: self._focus_month_section(w))
         return w
+
+    @staticmethod
+    def _focus_month_section(editor: QDateTimeEdit) -> None:
+        try:
+            editor.setCurrentSectionIndex(DueDateTimeDelegate.MONTH_SECTION_INDEX)
+        except RuntimeError:
+            pass
+
+    def eventFilter(self, editor, event):
+        if (
+            self._tab_target_column != -1
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() == Qt.Key_Tab
+            and event.modifiers() == Qt.KeyboardModifier.NoModifier
+        ):
+            view = self.parent()
+            row = editor.property("_tasks_editor_row")
+            if view is not None and row is not None:
+                self.commitData.emit(editor)
+                self.closeEditor.emit(editor, QAbstractItemDelegate.EndEditHint.NoHint)
+                target = view.model().index(int(row), self._tab_target_column)
+                if target.isValid():
+                    view.setCurrentIndex(target)
+                    view.edit(target)
+                return True
+        return super().eventFilter(editor, event)
 
     def updateEditorGeometry(self, editor, option, index):
         editor.setGeometry(inline_editor_rect(option, index, self.parent(), base_left=8, base_right=8))
@@ -2294,9 +2330,11 @@ class TasksPage(QWidget):
         if task_type_col != -1:
             self.table.setItemDelegateForColumn(task_type_col, TaskTypeDelegate(self.table))
 
-        # Due date editor
+        # Due date editor. Tab out of it jumps straight to Weight, skipping the
+        # click-only Status cell (it has no keyboard editor of its own).
         if due_col != -1:
-            self.table.setItemDelegateForColumn(due_col, DueDateTimeDelegate(self.table))
+            tab_target = weight_col if weight_col != -1 else -1
+            self.table.setItemDelegateForColumn(due_col, DueDateTimeDelegate(self.table, tab_target_column=tab_target))
 
         # Text cells use inset rounded editors so editing doesn't look like a floating white block.
         if item_col != -1:
@@ -2947,12 +2985,12 @@ class TasksPage(QWidget):
         c_task_type = view_col("task_type")
 
         fixed = {
-            c_due: 160,
-            c_status: 220,
-            c_priority: 100,
-            c_weight: 96,
-            c_grade: 96,
-            c_task_type: 110,
+            c_due: 130,
+            c_status: 190,
+            c_priority: 90,
+            c_weight: 84,
+            c_grade: 84,
+            c_task_type: 92,
         }
 
         # Course width from DB course names
@@ -2966,7 +3004,7 @@ class TasksPage(QWidget):
                 name = str(q.value(0) or "")
                 if name:
                     max_w = max(max_w, fm.horizontalAdvance(name))
-            fixed[c_course] = max(220, min(max_w + 56, 360))
+            fixed[c_course] = max(150, min(max_w + 56, 300))
 
         for col, w in fixed.items():
             if col == -1:
@@ -2976,6 +3014,7 @@ class TasksPage(QWidget):
 
         if c_item != -1:
             hh.setSectionResizeMode(c_item, QHeaderView.ResizeMode.Stretch)
+            hh.setMinimumSectionSize(110)
 
 
 

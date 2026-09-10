@@ -362,11 +362,11 @@ def application_theme_stylesheet(theme: str) -> str:
             background: {colors['menu_bg']};
             color: {colors['text']};
             border: 1px solid {colors['menu_border']};
-            padding: 6px;
+            padding: 4px;
         }}
         QMenu::item {{
-            padding: 6px 18px;
-            border-radius: 6px;
+            padding: 4px 12px;
+            border-radius: 5px;
             background: transparent;
         }}
         QMenu::item:selected {{
