@@ -2,7 +2,7 @@ import ctypes
 import sys
 
 from PySide6.QtCore import QCoreApplication, QEvent, Qt, QTimer, QSize
-from PySide6.QtGui import QFontMetrics, QIcon, QPainter, QPainterPath, QPixmap
+from PySide6.QtGui import QBitmap, QFontMetrics, QIcon, QImage, QPixmap, QRegion
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -30,33 +30,27 @@ from user_profiles import current_profile, list_profiles, set_current_profile
 from version import APP_DISPLAY_NAME, APP_VERSION
 
 
-def _rounded_brand_icon_pixmap(size: int, radius: int) -> QPixmap | None:
-    """The real app icon, scaled and corner-rounded to sit in the header like the old badge did."""
+def _brand_icon_pixmap(max_side: int) -> QPixmap | None:
+    """The real app icon with its empty margin trimmed, scaled to fit within max_side pixels."""
     icon_path = resolve_app_icon_path()
     if icon_path is None:
         return None
-    source = QIcon(str(icon_path)).pixmap(size, size)
+    source = QIcon(str(icon_path)).pixmap(512, 512)
     if source.isNull():
         source = QPixmap(str(icon_path))
     if source.isNull():
         return None
-    source = source.scaled(
-        size,
-        size,
-        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+
+    image = source.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    bounds = QRegion(QBitmap.fromImage(image.createAlphaMask())).boundingRect()
+    if not bounds.isEmpty():
+        source = source.copy(bounds)
+    return source.scaled(
+        max_side,
+        max_side,
+        Qt.AspectRatioMode.KeepAspectRatio,
         Qt.TransformationMode.SmoothTransformation,
     )
-
-    rounded = QPixmap(size, size)
-    rounded.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(rounded)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    path = QPainterPath()
-    path.addRoundedRect(0, 0, size, size, radius, radius)
-    painter.setClipPath(path)
-    painter.drawPixmap(0, 0, source)
-    painter.end()
-    return rounded
 
 
 def _apply_macos_window_chrome(window: QMainWindow, *, dark: bool) -> None:
@@ -170,38 +164,30 @@ class MainWindow(QMainWindow):
 
         self.header = QFrame()
         self.header.setObjectName("AppHeader")
-        self.header.setFixedHeight(60)
+        self.header.setFixedHeight(64)
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(22, 0, 22, 0)
-        header_layout.setSpacing(28)
+        header_layout.setSpacing(24)
 
-        brand = QWidget()
-        brand_layout = QHBoxLayout()
-        brand_layout.setContentsMargins(0, 0, 0, 0)
-        brand_layout.setSpacing(10)
         brand_mark = QLabel()
         brand_mark.setObjectName("BrandMark")
         brand_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        brand_mark.setFixedSize(34, 34)
-        icon_pixmap = _rounded_brand_icon_pixmap(68, 20)
+        brand_mark.setFixedSize(40, 40)
+        icon_pixmap = _brand_icon_pixmap(52)
         if icon_pixmap is not None:
             icon_pixmap.setDevicePixelRatio(2.0)
             brand_mark.setPixmap(icon_pixmap)
         else:
             brand_mark.setText("S")
-        # The real icon paints its own background; only the "S" fallback needs
-        # the accent badge styling behind it (see BrandMark[hasIcon] in the
-        # header stylesheet below).
+        # With the real icon the label is a neutral tile behind the glyph; the "S" fallback gets the accent badge.
         brand_mark.setProperty("hasIcon", icon_pixmap is not None)
-        brand_name = QLabel(APP_DISPLAY_NAME)
-        brand_name.setObjectName("BrandName")
-        brand_layout.addWidget(brand_mark)
-        brand_layout.addWidget(brand_name, 0, Qt.AlignmentFlag.AlignVCenter)
-        brand.setLayout(brand_layout)
-        header_layout.addWidget(brand)
+        header_layout.addWidget(brand_mark, 0, Qt.AlignmentFlag.AlignVCenter)
 
+        self.nav_pill = QFrame()
+        self.nav_pill.setObjectName("NavPill")
         nav_row = QHBoxLayout()
-        nav_row.setSpacing(4)
+        nav_row.setContentsMargins(4, 4, 4, 4)
+        nav_row.setSpacing(2)
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
         self.nav_buttons: list[QPushButton] = []
@@ -218,17 +204,36 @@ class MainWindow(QMainWindow):
             self.nav_group.addButton(button, index)
             self.nav_buttons.append(button)
             nav_row.addWidget(button)
-        header_layout.addLayout(nav_row)
+        self.nav_pill.setLayout(nav_row)
+        header_layout.addWidget(self.nav_pill, 0, Qt.AlignmentFlag.AlignVCenter)
 
         header_layout.addStretch(1)
 
-        self.header_user = QLabel("Local workspace")
-        self.header_user.setObjectName("HeaderUser")
-        header_layout.addWidget(self.header_user)
+        self.header_user = QWidget()
+        user_layout = QHBoxLayout()
+        user_layout.setContentsMargins(0, 0, 0, 0)
+        user_layout.setSpacing(10)
+        self.header_avatar = QLabel("L")
+        self.header_avatar.setObjectName("HeaderAvatar")
+        self.header_avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.header_avatar.setFixedSize(30, 30)
+        user_text_layout = QVBoxLayout()
+        user_text_layout.setContentsMargins(0, 0, 0, 0)
+        user_text_layout.setSpacing(0)
+        self.header_user_name = QLabel("Local workspace")
+        self.header_user_name.setObjectName("HeaderUserName")
+        self.header_user_detail = QLabel("Local workspace")
+        self.header_user_detail.setObjectName("HeaderUserDetail")
+        user_text_layout.addWidget(self.header_user_name)
+        user_text_layout.addWidget(self.header_user_detail)
+        user_layout.addWidget(self.header_avatar)
+        user_layout.addLayout(user_text_layout)
+        self.header_user.setLayout(user_layout)
+        header_layout.addWidget(self.header_user, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        self.version_label = QLabel(f"Syllora {APP_VERSION}")
+        self.version_label = QLabel(f"v{APP_VERSION}")
         self.version_label.setObjectName("HeaderVersion")
-        header_layout.addWidget(self.version_label)
+        header_layout.addWidget(self.version_label, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.header.setLayout(header_layout)
 
@@ -352,12 +357,14 @@ class MainWindow(QMainWindow):
 
     def _refresh_sidebar_identity(self) -> None:
         profile = current_profile()
-        full_text = "Local workspace" if profile is None else f"{profile.name} · Local workspace"
-        # Elide rather than letting a long profile name overflow into the nav
-        # buttons or version label next to it.
-        elided = QFontMetrics(self.header_user.font()).elidedText(full_text, Qt.TextElideMode.ElideRight, 260)
-        self.header_user.setText(elided)
-        self.header_user.setToolTip(full_text)
+        name = "" if profile is None else str(profile.name or "").strip()
+        display_name = name or "Local workspace"
+        # Elide rather than letting a long profile name crowd the version label next to it.
+        elided = QFontMetrics(self.header_user_name.font()).elidedText(display_name, Qt.TextElideMode.ElideRight, 180)
+        self.header_user_name.setText(elided)
+        self.header_user_detail.setVisible(bool(name))
+        self.header_avatar.setText(display_name[0].upper())
+        self.header_user.setToolTip(f"{name} · Local workspace" if name else "Local workspace")
 
     def _apply_window_size_constraints(self) -> None:
         target = QSize(self.DESIGN_WINDOW_SIZE)
@@ -394,49 +401,64 @@ class MainWindow(QMainWindow):
         self.header.setStyleSheet(
             f"""
             QFrame#AppHeader {{
-                background: {colors['panel_bg']};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {colors['surface_bg']}, stop:1 {colors['panel_bg']});
                 border: none;
                 border-bottom: 1px solid {colors['border']};
+            }}
+            QLabel#BrandMark[hasIcon="true"] {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {colors['surface_alt_bg']}, stop:1 {colors['surface_bg']});
+                border: 1px solid {colors['border_soft']};
+                border-radius: 12px;
             }}
             QLabel#BrandMark[hasIcon="false"] {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {colors['accent_hover']}, stop:1 {colors['accent']});
                 color: {colors['accent_text']};
                 border: 1px solid rgba(255, 255, 255, 0.22);
-                border-radius: 10px;
-                font-size: 16px;
+                border-radius: 12px;
+                font-size: 17px;
                 font-weight: 800;
                 padding-bottom: 1px;
             }}
-            QLabel#BrandName {{
-                color: {colors['text_soft']};
-                font-size: 16px;
-                font-weight: 750;
-                letter-spacing: -0.2px;
+            QFrame#NavPill {{
+                background: {colors['panel_bg']};
+                border: 1px solid {colors['border_soft']};
+                border-radius: 14px;
             }}
             QPushButton#HeaderNavButton {{
                 background: transparent;
                 color: {colors['muted_text']};
                 border: 1px solid transparent;
-                border-radius: 9px;
-                padding: 8px 16px;
+                border-radius: 10px;
+                padding: 7px 16px;
                 text-align: center;
                 font-size: 13px;
                 font-weight: 600;
             }}
             QPushButton#HeaderNavButton:hover {{
-                background: {colors['surface_bg']};
+                background: {colors['surface_alt_bg']};
                 color: {colors['text_soft']};
-                border-color: {colors['border_soft']};
             }}
             QPushButton#HeaderNavButton:checked {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(69, 178, 255, 0.34), stop:1 rgba(69, 178, 255, 0.20));
+                color: {colors['text_soft']};
+                border-color: rgba(69, 178, 255, 0.45);
+            }}
+            QLabel#HeaderAvatar {{
                 background: {colors['accent_tint']};
                 color: {colors['text_soft']};
-                border-color: rgba(69, 178, 255, 0.36);
-            }}
-            QLabel#HeaderUser {{
-                color: {colors['text']};
+                border: 1px solid rgba(69, 178, 255, 0.40);
+                border-radius: 15px;
                 font-size: 12px;
-                font-weight: 600;
+                font-weight: 700;
+            }}
+            QLabel#HeaderUserName {{
+                color: {colors['text_soft']};
+                font-size: 12px;
+                font-weight: 650;
+            }}
+            QLabel#HeaderUserDetail {{
+                color: {colors['faint_text']};
+                font-size: 10px;
             }}
             QLabel#HeaderVersion {{
                 color: {colors['faint_text']};
