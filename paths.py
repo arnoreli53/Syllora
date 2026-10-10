@@ -1,4 +1,5 @@
 import shutil
+import sys
 from pathlib import Path
 
 from version import APP_DB_FILENAME, APP_NAME, LEGACY_APP_NAME, LEGACY_DB_FILENAME
@@ -51,3 +52,61 @@ def set_active_data_paths(
 
 _migrate_legacy_app_support()
 UPDATES_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def current_app_bundle() -> Path | None:
+    """The .app bundle root when running as a packaged macOS build, else None."""
+    exe = Path(sys.executable).resolve()
+    if exe.parent.name == "MacOS" and exe.parent.parent.name == "Contents":
+        bundle = exe.parent.parent.parent
+        if bundle.suffix == ".app":
+            return bundle
+    return None
+
+
+def resolve_app_icon_path() -> Path | None:
+    """Locate the app's icon file across dev, PyInstaller, and bundled builds."""
+    icns_candidates: list[Path] = []
+    png_candidates: list[Path] = []
+    seen: set[Path] = set()
+
+    def add_candidate(path: Path) -> None:
+        if path in seen:
+            return
+        seen.add(path)
+        if path.suffix.lower() == ".icns":
+            icns_candidates.append(path)
+        else:
+            png_candidates.append(path)
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        base = Path(meipass).resolve()
+        add_candidate(base / "icon.icns")
+        add_candidate(base / "icon-windowed.icns")
+        add_candidate(base / "icon.png")
+
+    executable_parent = Path(sys.executable).resolve().parent
+    add_candidate(executable_parent / "icon.icns")
+    add_candidate(executable_parent / "icon-windowed.icns")
+    add_candidate(executable_parent / "icon.png")
+    add_candidate(executable_parent / "_internal" / "icon.icns")
+    add_candidate(executable_parent / "_internal" / "icon-windowed.icns")
+    add_candidate(executable_parent / "_internal" / "icon.png")
+
+    bundle = current_app_bundle()
+    if bundle is not None:
+        resources = bundle / "Contents" / "Resources"
+        add_candidate(resources / "icon.icns")
+        add_candidate(resources / "icon-windowed.icns")
+        add_candidate(resources / "icon.png")
+
+    here = Path(__file__).resolve().parent
+    add_candidate(here / "icon.icns")
+    add_candidate(here / "icon-windowed.icns")
+    add_candidate(here / "icon.png")
+
+    for path in [*icns_candidates, *png_candidates]:
+        if path.exists():
+            return path
+    return None

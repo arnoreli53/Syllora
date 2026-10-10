@@ -7,67 +7,13 @@ from PySide6.QtWidgets import QApplication, QDialog
 from db_qt import close_db, open_db
 from migrate import ensure_schema
 from onboarding import OnboardingDialog
+from paths import current_app_bundle as _current_app_bundle
+from paths import resolve_app_icon_path as _app_icon_path
 from ui_common import apply_app_theme
 from ui_main import MainWindow
 from ui_settings import get_theme
 from user_profiles import activate_current_profile, create_profile, needs_onboarding
 from version import APP_DISPLAY_NAME, APP_NAME
-
-
-def _current_app_bundle() -> Path | None:
-    exe = Path(sys.executable).resolve()
-    if exe.parent.name == "MacOS" and exe.parent.parent.name == "Contents":
-        bundle = exe.parent.parent.parent
-        if bundle.suffix == ".app":
-            return bundle
-    return None
-
-
-def _app_icon_path() -> Path | None:
-    icns_candidates: list[Path] = []
-    png_candidates: list[Path] = []
-    seen: set[Path] = set()
-
-    def add_candidate(path: Path) -> None:
-        if path in seen:
-            return
-        seen.add(path)
-        if path.suffix.lower() == ".icns":
-            icns_candidates.append(path)
-        else:
-            png_candidates.append(path)
-
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        base = Path(meipass).resolve()
-        add_candidate(base / "icon.icns")
-        add_candidate(base / "icon-windowed.icns")
-        add_candidate(base / "icon.png")
-
-    executable_parent = Path(sys.executable).resolve().parent
-    add_candidate(executable_parent / "icon.icns")
-    add_candidate(executable_parent / "icon-windowed.icns")
-    add_candidate(executable_parent / "icon.png")
-    add_candidate(executable_parent / "_internal" / "icon.icns")
-    add_candidate(executable_parent / "_internal" / "icon-windowed.icns")
-    add_candidate(executable_parent / "_internal" / "icon.png")
-
-    bundle = _current_app_bundle()
-    if bundle is not None:
-        resources = bundle / "Contents" / "Resources"
-        add_candidate(resources / "icon.icns")
-        add_candidate(resources / "icon-windowed.icns")
-        add_candidate(resources / "icon.png")
-
-    here = Path(__file__).resolve().parent
-    add_candidate(here / "icon.icns")
-    add_candidate(here / "icon-windowed.icns")
-    add_candidate(here / "icon.png")
-
-    for path in [*icns_candidates, *png_candidates]:
-        if path.exists():
-            return path
-    return None
 
 
 def _set_macos_application_icon(icon_path: Path) -> None:
