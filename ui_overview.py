@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import html
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QDate, QDateTime, Signal, QEvent, QRect, QPropertyAnimation, QParallelAnimationGroup, QEasingCurve, QTimer
-from PySide6.QtGui import QColor, QBrush, QPalette, QIcon, QStandardItem, QStandardItemModel
+from PySide6.QtGui import QColor, QBrush, QPalette, QIcon
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -13,7 +14,6 @@ from PySide6.QtWidgets import (
     QTableView,
     QFrame,
     QHeaderView,
-    QScrollArea,
     QSizePolicy,
     QStyledItemDelegate,
     QStyle,
@@ -33,6 +33,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtSql import QSqlQueryModel, QSqlQuery
 from ui_common import apply_body_font, common_page_stylesheet, scaled_row_height, theme_colors
 from ui_courses import format_current_course_grade_for_mode, list_current_course_completion_state
+
+
+REMINDER_STARTUP_DELAY_MS = 2_000
+REMINDER_POLL_INTERVAL_MS = 15 * 60 * 1000
 
 
 def _current_academic_year_start() -> int:
@@ -118,38 +122,6 @@ class RowCardDelegate(QStyledItemDelegate):
 
         opt.rect = opt.rect.adjusted(10, 2, -10, -2)
         super().paint(painter, opt, index)
-
-
-class OverviewGradesDelegate(QStyledItemDelegate):
-    """Keep course names left-aligned, checkmarks centered, and grade values right-aligned."""
-
-    def initStyleOption(self, option, index) -> None:
-        super().initStyleOption(option, index)
-        if index.column() == 2:
-            option.displayAlignment = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        elif index.column() == 1:
-            option.displayAlignment = Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
-        else:
-            option.displayAlignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-
-    def paint(self, painter, option, index) -> None:
-        if index.column() == 1:
-            model = index.model()
-            if model is not None:
-                is_complete = model.data(index, Qt.DisplayRole)
-                if is_complete == 1:
-                    painter.save()
-                    painter.setFont(option.font)
-                    painter.setPen(option.palette.color(QPalette.Text))
-                    painter.drawText(option.rect, Qt.AlignmentFlag.AlignCenter, "✅")
-                    painter.restore()
-                    return
-                # Hide the raw 0 value for incomplete courses
-                painter.save()
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.restore()
-                return
-        super().paint(painter, option, index)
 
 
 class QuickAddTaskDialog(QDialog):
@@ -589,6 +561,16 @@ class OverviewPage(QWidget):
             self._tray_icon.setToolTip("Syllora overview reminders")
             self._tray_icon.setVisible(True)
         self._last_reminder_notification: str | None = None
+        # Notifications posted before the app finishes launching are dropped by the OS, so hold
+        # them back until the event loop has been running for a moment.
+        self._reminder_notifications_ready = False
+        self._reminder_startup_timer = QTimer(self)
+        self._reminder_startup_timer.setSingleShot(True)
+        self._reminder_startup_timer.timeout.connect(self._enable_reminder_notifications)
+        self._reminder_startup_timer.start(REMINDER_STARTUP_DELAY_MS)
+        self._reminder_poll_timer = QTimer(self)
+        self._reminder_poll_timer.timeout.connect(self._poll_reminders)
+        self._reminder_poll_timer.start(REMINDER_POLL_INTERVAL_MS)
 
         title = QLabel("Overview")
         title.setObjectName("Title")
@@ -616,76 +598,23 @@ class OverviewPage(QWidget):
 
         self.model = OverviewModel()
         self.model.setParent(self)
-        self.grades_model = QStandardItemModel(0, 3, self)
+        grades_heading = QLabel("Current grades")
+        grades_heading.setObjectName("OverviewGradesHeading")
 
-        grades_title = QLabel("Current Grades")
-        grades_title.setObjectName("OverviewSideHeading")
+        self.grades_summary = QLabel("")
+        self.grades_summary.setObjectName("OverviewGradesSummary")
+        self.grades_summary.setTextFormat(Qt.TextFormat.RichText)
+        self.grades_summary.setWordWrap(True)
 
-        self.grades_table = QTableView()
-        self.grades_table.setModel(self.grades_model)
-        self.grades_table.setSelectionMode(QTableView.SelectionMode.NoSelection)
-        self.grades_table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
-        self.grades_table.setShowGrid(False)
-        self.grades_table.setAlternatingRowColors(True)
-        self.grades_table.verticalHeader().setVisible(False)
-        self.grades_table.verticalHeader().setDefaultSectionSize(30)
-        self.grades_table.setWordWrap(False)
-        self.grades_table.setTextElideMode(Qt.TextElideMode.ElideRight)
-        self.grades_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.grades_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.grades_table.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        self.grades_table.horizontalHeader().setVisible(False)
-        self.grades_table.setItemDelegate(OverviewGradesDelegate(self.grades_table))
+        grades_strip_layout = QHBoxLayout()
+        grades_strip_layout.setContentsMargins(18, 12, 18, 12)
+        grades_strip_layout.setSpacing(20)
+        grades_strip_layout.addWidget(grades_heading, 0, Qt.AlignmentFlag.AlignTop)
+        grades_strip_layout.addWidget(self.grades_summary, 1)
 
-        gh = self.grades_table.horizontalHeader()
-        gh.setStretchLastSection(True)
-        gh.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        gh.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        gh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.grades_table.setColumnWidth(0, 120)
-        self.grades_table.setColumnWidth(1, 24)
-
-        self.grades_panel_divider = QFrame()
-        self.grades_panel_divider.setObjectName("OverviewDivider")
-        self.grades_panel_divider.setFixedHeight(1)
-
-        self.grades_panel_heading = QLabel("")
-        self.grades_panel_heading.setObjectName("OverviewSideHeading")
-        self.grades_panel_heading.setVisible(False)
-
-        self.attention_scroll = QScrollArea()
-        self.attention_scroll.setWidgetResizable(True)
-        self.attention_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.attention_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.attention_scroll.setMinimumHeight(118)
-        self.attention_scroll.setMaximumHeight(360)
-        self.attention_container = QWidget()
-        self.attention_layout = QVBoxLayout()
-        self.attention_layout.setContentsMargins(0, 0, 0, 0)
-        self.attention_layout.setSpacing(8)
-        self.attention_container.setLayout(self.attention_layout)
-        self.attention_scroll.setWidget(self.attention_container)
-
-        grades_card = QFrame()
-        grades_card.setObjectName("OverviewSideSurface")
-        grades_card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Maximum)
-        grades_card.setMinimumWidth(260)
-        grades_card.setMaximumWidth(320)
-        self.grades_card = grades_card
-        self.grades_empty = OverviewEmptyState(
-            "No grades available...for now.",
-            "Course averages will appear here.",
-        )
-        grades_layout = QVBoxLayout()
-        grades_layout.setContentsMargins(10, 10, 10, 10)
-        grades_layout.setSpacing(8)
-        grades_layout.addWidget(grades_title)
-        grades_layout.addWidget(self.grades_table)
-        grades_layout.addWidget(self.grades_empty)
-        grades_layout.addWidget(self.grades_panel_divider)
-        grades_layout.addWidget(self.grades_panel_heading)
-        grades_layout.addWidget(self.attention_scroll)
-        grades_card.setLayout(grades_layout)
+        self.grades_strip = QFrame()
+        self.grades_strip.setObjectName("OverviewGradesStrip")
+        self.grades_strip.setLayout(grades_strip_layout)
 
         self.table = QTableView()
         self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -839,16 +768,12 @@ class OverviewPage(QWidget):
         card_layout.addWidget(self.upcoming_empty)
         upcoming_card.setLayout(card_layout)
 
-        main = QHBoxLayout()
-        main.setSpacing(16)
-        main.addWidget(upcoming_card, 1, Qt.AlignmentFlag.AlignTop)
-        main.addWidget(grades_card, 0, Qt.AlignmentFlag.AlignTop)
-
         root = QVBoxLayout()
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(18)
+        root.setSpacing(16)
         root.addLayout(top)
-        root.addLayout(main)
+        root.addWidget(self.grades_strip)
+        root.addWidget(upcoming_card)
         root.addStretch(1)
 
         content = QWidget()
@@ -873,33 +798,6 @@ class OverviewPage(QWidget):
         self.apply_settings()
         self.refresh()
 
-    def _build_section_label(self, text: str) -> QLabel:
-        label = QLabel(text)
-        label.setObjectName("OverviewGlanceSectionLabel")
-        return label
-
-    def _build_glance_card(self, title: str, lines: list[str], *, hero: bool = False) -> QFrame:
-        card = QFrame()
-        card.setObjectName("OverviewGlanceHeroCard" if hero else "OverviewGlanceCard")
-
-        title_label = QLabel(title)
-        title_label.setObjectName("OverviewGlanceHeroTitle" if hero else "OverviewGlanceTitle")
-        title_label.setWordWrap(True)
-
-        layout = QVBoxLayout()
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(4 if hero else 3)
-        layout.addWidget(title_label)
-        for line in lines:
-            if not line:
-                continue
-            detail_label = QLabel(line)
-            detail_label.setObjectName("OverviewGlanceMeta")
-            detail_label.setWordWrap(True)
-            layout.addWidget(detail_label)
-        card.setLayout(layout)
-        return card
-
     def _show_desktop_notification(self, title: str, message: str) -> None:
         if self._tray_icon is None or not self._tray_icon.supportsMessages():
             return
@@ -910,8 +808,20 @@ class OverviewPage(QWidget):
             8000,
         )
 
+    def _enable_reminder_notifications(self) -> None:
+        self._reminder_notifications_ready = True
+        self._maybe_notify_reminders(
+            self._collect_overview_rows(), QDateTime.currentDateTime(), get_overview_upcoming_days()
+        )
+
+    def _poll_reminders(self) -> None:
+        # Re-query so tasks that have since become due soon or overdue are noticed without a click.
+        if self._overview_animating or not get_overview_reminders_enabled():
+            return
+        self.refresh()
+
     def _maybe_notify_reminders(self, rows: list[dict], now: QDateTime, glance_days: int) -> None:
-        if not get_overview_reminders_enabled():
+        if not self._reminder_notifications_ready or not get_overview_reminders_enabled():
             return
 
         lines = self._build_reminder_summary(rows, now, glance_days)
@@ -936,17 +846,6 @@ class OverviewPage(QWidget):
     def _format_compact_due(self, dt: QDateTime) -> str:
         if not dt.isValid():
             return "Unknown"
-        return dt.toString("MMM d")
-
-    def _format_glance_due(self, dt: QDateTime, now: QDateTime) -> str:
-        if not dt.isValid():
-            return "Unknown"
-        date = dt.date()
-        today = now.date()
-        if date == today:
-            return "Today"
-        if date == today.addDays(1):
-            return "Tomorrow"
         return dt.toString("MMM d")
 
     def _collect_overview_rows(self) -> list[dict]:
@@ -980,22 +879,6 @@ class OverviewPage(QWidget):
             )
         return rows
 
-    def _build_bucket_summary(self, rows: list[dict], now: QDateTime) -> list[str]:
-        if not rows:
-            return ["Nothing due in this bucket."]
-
-        course_names = sorted({str(row["course"]).strip() for row in rows if str(row["course"]).strip()})
-        course_summary = ", ".join(course_names[:2])
-        if len(course_names) > 2:
-            course_summary += f" +{len(course_names) - 2} more"
-
-        first_row = min(rows, key=lambda row: int(row["due"].toSecsSinceEpoch()))
-        lines = [f"{len(rows)} item(s) across {len(course_names)} course(s)"]
-        if course_summary:
-            lines.append(f"Courses: {course_summary}")
-        lines.append(f"First due: {first_row['item']} • {self._format_glance_due(first_row['due'], now)}")
-        return lines
-
     def _build_reminder_summary(self, rows: list[dict], now: QDateTime, glance_days: int) -> list[str]:
         overdue_rows = [row for row in rows if row["due"] < now]
         due_soon_rows = [
@@ -1024,156 +907,6 @@ class OverviewPage(QWidget):
             *lines,
         ]
 
-    def _build_week_snapshot(self, rows: list[dict], now: QDateTime, glance_days: int) -> tuple[str, list[str]]:
-        overdue_rows = [row for row in rows if row["due"] < now]
-        future_rows = [row for row in rows if row["due"] >= now]
-        today = now.date()
-        today_rows = [row for row in future_rows if row["due"].date() == today]
-        tomorrow_rows = [row for row in future_rows if row["due"].date() == today.addDays(1)]
-        within_glance_rows = [row for row in future_rows if row["due"].date() <= today.addDays(glance_days - 1)]
-
-        title = "Nothing pressing right now"
-        if overdue_rows:
-            title = "Overdue items need clearing"
-        elif today_rows:
-            title = "Today needs attention"
-        elif tomorrow_rows:
-            title = "Tomorrow is your next pinch point"
-        elif future_rows:
-            title = "Your next stretch is manageable"
-
-        total_courses = len({str(row["course"]).strip() for row in rows if str(row["course"]).strip()})
-        lines = [f"{len(rows)} item(s) across {total_courses} course(s) in the current overview window."]
-        count_parts: list[str] = []
-        if overdue_rows:
-            count_parts.append(f"Overdue: {len(overdue_rows)}")
-        count_parts.append(f"Today: {len(today_rows)}")
-        count_parts.append(f"Tomorrow: {len(tomorrow_rows)}")
-        later_this_week = max(0, len(within_glance_rows) - len(today_rows) - len(tomorrow_rows))
-        count_parts.append(f"Next {max(1, glance_days - 2)} day(s): {later_this_week}")
-        lines.append(" • ".join(count_parts))
-
-        next_due_row = min(future_rows, key=lambda row: int(row["due"].toSecsSinceEpoch()), default=None)
-        if next_due_row is not None:
-            lines.append(
-                f"Next due: {next_due_row['item']} • {self._format_glance_due(next_due_row['due'], now)} • {next_due_row['course']}"
-            )
-        elif overdue_rows:
-            oldest_overdue = min(overdue_rows, key=lambda row: int(row["due"].toSecsSinceEpoch()))
-            lines.append(
-                f"Oldest overdue: {oldest_overdue['item']} • {self._format_glance_due(oldest_overdue['due'], now)} • {oldest_overdue['course']}"
-            )
-
-        return title, lines
-
-    def _build_day_buckets(self, rows: list[dict], now: QDateTime, glance_days: int) -> list[tuple[str, list[str]]]:
-        buckets: list[tuple[str, list[str]]] = []
-        today = now.date()
-
-        overdue_rows = sorted((row for row in rows if row["due"] < now), key=lambda row: int(row["due"].toSecsSinceEpoch()))
-        if overdue_rows:
-            buckets.append(("Overdue", self._build_bucket_summary(overdue_rows, now)))
-
-        future_rows = [row for row in rows if row["due"] >= now]
-        for offset in range(glance_days):
-            bucket_date = today.addDays(offset)
-            bucket_rows = sorted(
-                (row for row in future_rows if row["due"].date() == bucket_date),
-                key=lambda row: int(row["due"].toSecsSinceEpoch()),
-            )
-            if not bucket_rows:
-                continue
-            if offset == 0:
-                title = "Today"
-            elif offset == 1:
-                title = "Tomorrow"
-            else:
-                title = bucket_date.toString("ddd, MMM d")
-            buckets.append((title, self._build_bucket_summary(bucket_rows, now)))
-
-        later_rows = sorted(
-            (row for row in future_rows if row["due"].date() > today.addDays(glance_days - 1)),
-            key=lambda row: int(row["due"].toSecsSinceEpoch()),
-        )
-        if later_rows:
-            next_later = later_rows[0]
-            buckets.append(
-                (
-                    "Later in the overview window",
-                    [
-                        f"{len(later_rows)} item(s) sit beyond the next {glance_days} day(s).",
-                        f"Next after that: {next_later['item']} • {self._format_glance_due(next_later['due'], now)} • {next_later['course']}",
-                    ],
-                )
-            )
-
-        return buckets
-
-    def _clear_layout(self, layout: QVBoxLayout) -> None:
-        while layout.count():
-            child = layout.takeAt(0)
-            widget = child.widget()
-            if widget is not None:
-                widget.deleteLater()
-                continue
-            nested = child.layout()
-            if nested is not None:
-                self._clear_layout(nested)  # type: ignore[arg-type]
-
-    def _update_grades_table_height(self) -> None:
-        row_count = self.grades_model.rowCount()
-        header = self.grades_table.horizontalHeader()
-        header_height = header.height() if header.isVisible() else 0
-        frame = self.grades_table.frameWidth() * 2
-        row_height = max(24, self.grades_table.verticalHeader().defaultSectionSize())
-        visible_rows = min(max(row_count, 1), 6)
-        target_height = header_height + frame + (visible_rows * row_height) + 4
-        self.grades_table.setMinimumHeight(target_height)
-        self.grades_table.setMaximumHeight(target_height)
-
-    def _update_right_panel(
-        self,
-        rows: list[dict],
-        upcoming_days: int,
-    ) -> None:
-        now = QDateTime.currentDateTime()
-        self._clear_layout(self.attention_layout)
-        glance_days = max(1, min(7, int(upcoming_days)))
-
-        if not rows:
-            self.attention_scroll.setMinimumHeight(112)
-            self.attention_scroll.setMaximumHeight(112)
-            self.attention_layout.addWidget(
-                self._build_glance_card(
-                    "Nothing pressing right now",
-                    ["Take a breath"],
-                    hero=True,
-                )
-            )
-            self.attention_layout.addStretch(1)
-            return
-
-        self.attention_scroll.setMinimumHeight(180)
-        self.attention_scroll.setMaximumHeight(360)
-
-        hero_title, hero_lines = self._build_week_snapshot(rows, now, glance_days)
-        self.attention_layout.addWidget(
-            self._build_glance_card(hero_title, hero_lines, hero=True)
-        )
-
-        reminder_lines = self._build_reminder_summary(rows, now, glance_days)
-        if reminder_lines:
-            self.attention_layout.addWidget(self._build_section_label("Reminders"))
-            self.attention_layout.addWidget(self._build_glance_card("Action required", reminder_lines))
-
-        buckets = self._build_day_buckets(rows, now, glance_days)
-        if buckets:
-            self.attention_layout.addWidget(self._build_section_label("Day by Day"))
-            for title, lines in buckets[:8]:
-                self.attention_layout.addWidget(self._build_glance_card(title, lines))
-
-        self.attention_layout.addStretch(1)
-
     def _open_quick_add_dialog(self) -> None:
         dialog = QuickAddTaskDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -1199,10 +932,20 @@ class OverviewPage(QWidget):
                 border: 1px solid {colors['border_soft']};
                 border-radius: 18px;
             }}
-            QFrame#OverviewSideSurface {{
+            QFrame#OverviewGradesStrip {{
                 background: {colors['card_bg']};
                 border: 1px solid {colors['border_soft']};
-                border-radius: 18px;
+                border-radius: 14px;
+            }}
+            QLabel#OverviewGradesHeading {{
+                color: {colors['muted_text']};
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 1px;
+                padding-top: 2px;
+            }}
+            QLabel#OverviewGradesSummary {{
+                color: {colors['text']};
             }}
             QFrame#HeaderBar {{
                 background: transparent;
@@ -1231,37 +974,9 @@ class OverviewPage(QWidget):
                 background: {colors['divider']};
                 border: 0px;
             }}
-            QLabel#OverviewSideHeading {{
-                color: {colors['text_soft']};
-                font-weight: 700;
-            }}
             QLabel#OverviewHeaderLabel {{
                 color: {colors['text_soft']};
                 font-weight: 600;
-            }}
-            QFrame#OverviewGlanceCard, QFrame#OverviewGlanceHeroCard {{
-                background: {colors['surface_alt_bg']};
-                border: 1px solid {colors['border_soft']};
-                border-radius: 14px;
-            }}
-            QFrame#OverviewGlanceHeroCard {{
-                background: {colors['surface_bg']};
-                border: 1px solid {colors['border_soft']};
-            }}
-            QLabel#OverviewGlanceSectionLabel {{
-                color: {colors['muted_text']};
-                font-size: 11px;
-                font-weight: 700;
-            }}
-            QLabel#OverviewGlanceHeroTitle, QLabel#OverviewGlanceTitle {{
-                color: {colors['text_soft']};
-                font-weight: 700;
-            }}
-            QLabel#OverviewGlanceHeroTitle {{
-                font-size: 15px;
-            }}
-            QLabel#OverviewGlanceMeta {{
-                color: {colors['muted_text']};
             }}
             QPushButton#OverviewUndoButton {{
                 background: {colors['secondary_bg']};
@@ -1301,19 +1016,6 @@ class OverviewPage(QWidget):
             }}
             """
         )
-        self.grades_table.setStyleSheet(
-            f"QTableView {{ background: {colors['surface_bg']}; color: {colors['text']}; border: none; border-radius: 12px; "
-            f"alternate-background-color: {colors['surface_alt_bg']}; }}"
-            f"QTableView::item {{ padding: 8px 10px; border: none; }}"
-            f"QTableView::item:alternate {{ background: {colors['surface_alt_bg']}; }}"
-            f"QHeaderView::section {{ border: 0px; border-right: 0px; border-left: 0px; padding-left: 12px; padding-right: 8px; "
-            f"font-weight: 600; background: transparent; color: {colors['header_text']}; border-bottom: 1px solid {colors['border_soft']}; }}"
-        )
-        grades_palette = QPalette(self.grades_table.palette())
-        grades_palette.setColor(QPalette.ColorRole.Base, QColor(colors["surface_bg"]))
-        grades_palette.setColor(QPalette.ColorRole.AlternateBase, QColor(colors["surface_alt_bg"]))
-        grades_palette.setColor(QPalette.ColorRole.Text, QColor(colors["text"]))
-        self.grades_table.setPalette(grades_palette)
         table_palette = QPalette(self.table.palette())
         transparent_brush = QBrush(Qt.GlobalColor.transparent)
         for role in (
@@ -1329,11 +1031,7 @@ class OverviewPage(QWidget):
         self.table.verticalHeader().setDefaultSectionSize(
             scaled_row_height(mode, compact=get_compact_rows(), compact_px=40, regular_px=48)
         )
-        self.grades_table.verticalHeader().setDefaultSectionSize(
-            scaled_row_height(mode, compact=get_compact_rows(), compact_px=24, regular_px=30)
-        )
         self.apply_column_layout()
-        self._update_grades_table_height()
 
     def update_empty_states(self) -> None:
         has_upcoming = self.model.rowCount() > 0
@@ -1345,14 +1043,7 @@ class OverviewPage(QWidget):
             self.table.setMinimumHeight((visible_rows * row_height) + 8)
             self.table.setMaximumHeight((visible_rows * row_height) + 8)
 
-        has_grades = self.grades_model.rowCount() > 0
-        self.grades_table.setVisible(has_grades)
-        self.grades_empty.setVisible(not has_grades)
-
     def _refresh_current_grades(self, grade_mode: str) -> None:
-        self.grades_model.clear()
-        self.grades_model.setColumnCount(3)
-
         summaries = list_current_course_completion_state()
         visible_summaries = [
             summary
@@ -1363,20 +1054,20 @@ class OverviewPage(QWidget):
         ]
         visible_summaries.sort(key=lambda summary: str(summary.get("course_name", "") or "").strip().lower())
 
+        colors = theme_colors(get_theme())
+        entries: list[str] = []
         for summary in visible_summaries:
-            course_text = str(summary.get("course_name", "") or "").strip()
-            current_text = format_current_course_grade_for_mode(summary, grade_mode)
+            course_text = html.escape(str(summary.get("course_name", "") or "").strip()).replace(" ", "&nbsp;")
+            grade_text = html.escape(format_current_course_grade_for_mode(summary, grade_mode)).replace(" ", "&nbsp;")
+            done_mark = "&nbsp;✅" if summary.get("is_complete") else ""
+            entries.append(
+                f'<span style="color:{colors["muted_text"]}">{course_text}</span>'
+                f'&nbsp;&nbsp;<b style="color:{colors["text_soft"]}">{grade_text}</b>{done_mark}'
+            )
 
-            course_item = QStandardItem(course_text)
-            complete_item = QStandardItem()
-            complete_item.setData(1 if summary.get("is_complete") else 0, Qt.DisplayRole)
-            current_item = QStandardItem(current_text)
-
-            for item in (course_item, complete_item, current_item):
-                item.setEditable(False)
-
-            self.grades_model.appendRow([course_item, complete_item, current_item])
-
+        # Non-breaking padding followed by one breakable space keeps wrapped lines free of leading separators.
+        self.grades_summary.setText("&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ".join(entries))
+        self.grades_strip.setVisible(bool(entries))
     def refresh(self) -> None:
         upcoming_days = get_overview_upcoming_days()
         due_soon_days = get_overview_due_soon_days()
@@ -1491,14 +1182,7 @@ class OverviewPage(QWidget):
         self.table.setColumnHidden(self.badges_col, False)
         self._refresh_current_grades(grade_mode)
 
-        self.grades_table.setColumnWidth(0, 120)
-        self.grades_table.setColumnWidth(1, 24)
-        self._update_grades_table_height()
         rows = self._collect_overview_rows()
-        self._update_right_panel(
-            rows,
-            upcoming_days=upcoming_days,
-        )
         self._maybe_notify_reminders(rows, QDateTime.currentDateTime(), upcoming_days)
 
         self.apply_column_layout()
@@ -1556,8 +1240,6 @@ class OverviewPage(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if hasattr(self, "grades_card"):
-            self.grades_card.setVisible(self.width() >= 980)
         QTimer.singleShot(0, self.apply_column_layout)
 
     def eventFilter(self, obj, event):

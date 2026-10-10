@@ -17,7 +17,7 @@ PYTHON_DIR = Path(__file__).resolve().parents[1]
 if str(PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(PYTHON_DIR))
 
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QDateTime, QEvent
 from PySide6.QtSql import QSqlQuery
 from PySide6.QtWidgets import QApplication
 
@@ -418,6 +418,54 @@ class UiSmokeTests(unittest.TestCase):
                     del window
                     APP.sendPostedEvents(None, QEvent.Type.DeferredDelete)
                     APP.processEvents()
+            finally:
+                close_db()
+
+
+class OverviewReminderTests(unittest.TestCase):
+    def test_startup_reminder_is_held_until_app_is_live_then_delivered_once(self) -> None:
+        import ui_overview
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths.set_active_data_paths(root / "reminders.db", root / "settings.ini")
+            open_db()
+            migrate.ensure_schema()
+            try:
+                execute(
+                    "INSERT INTO courses(name, term, academic_year_start) VALUES(?, ?, ?)",
+                    ("REM 101", "fall", 2026),
+                )
+                course_id = scalar("SELECT id FROM courses WHERE name = 'REM 101'")
+                due = QDateTime.currentDateTime().addDays(1).toString("yyyy-MM-dd HH:mm")
+                execute(
+                    "INSERT INTO tasks(course_id, item, status, due_datetime) VALUES(?, ?, ?, ?)",
+                    (course_id, "Essay", "not started", due),
+                )
+
+                sent: list[tuple[str, str]] = []
+                with patch.object(
+                    ui_overview.OverviewPage,
+                    "_show_desktop_notification",
+                    lambda self, title, message: sent.append((title, message)),
+                ):
+                    page = ui_overview.OverviewPage()
+                    page.refresh()
+                    APP.processEvents()
+                    # The OS drops notifications posted before the app has finished launching, so the
+                    # startup refreshes must not send (or mark as sent) anything yet.
+                    self.assertEqual(sent, [])
+
+                    page._reminder_startup_timer.stop()
+                    page._enable_reminder_notifications()
+                    self.assertEqual(len(sent), 1)
+                    self.assertEqual(sent[0][0], "Course reminders")
+
+                    page.refresh()
+                    self.assertEqual(len(sent), 1, "an unchanged reminder must not be re-sent")
+
+                    page.deleteLater()
+                    APP.sendPostedEvents(None, QEvent.Type.DeferredDelete)
             finally:
                 close_db()
 
