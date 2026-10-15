@@ -45,7 +45,7 @@ from ui_common import apply_body_font, common_page_stylesheet, font_metrics, sca
 from ui_settings import (
     get_compact_rows,
     get_confirm_delete,
-    get_effective_openai_api_key,
+    current_ai_auth,
     get_font_size_mode,
     get_gpa_last_x_credit_hours,
     get_gpa_view_mode,
@@ -1484,7 +1484,7 @@ class PreviousCoursesDialog(QDialog):
             return
 
         coordinator = TranscriptImportCoordinator(
-            api_key=get_effective_openai_api_key(),
+            auth=current_ai_auth(),
             model=get_syllabus_ai_model(),
         )
 

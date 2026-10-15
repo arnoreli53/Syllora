@@ -9,6 +9,7 @@ from version import APP_NAME
 
 
 KEYCHAIN_SERVICE = f"{APP_NAME} OpenAI API"
+CHATGPT_KEYCHAIN_SERVICE = f"{APP_NAME} ChatGPT"
 
 # Fingerprints let older installations discard credentials that were previously
 # shipped in the application without retaining those credentials in source.
@@ -46,7 +47,7 @@ def _security_command(*args: str, secret: str | None = None) -> subprocess.Compl
     )
 
 
-def load_secret(profile_id: str) -> str:
+def load_secret(profile_id: str, *, service: str = KEYCHAIN_SERVICE) -> str:
     if sys.platform != "darwin":
         return ""
 
@@ -55,24 +56,24 @@ def load_secret(profile_id: str) -> str:
         "-a",
         _account_name(profile_id),
         "-s",
-        KEYCHAIN_SERVICE,
+        service,
         "-w",
     )
     if result.returncode != 0:
         return ""
     secret = result.stdout.strip()
-    if is_compromised_secret(secret):
+    if service == KEYCHAIN_SERVICE and is_compromised_secret(secret):
         delete_secret(profile_id)
         return ""
     return secret
 
 
-def save_secret(profile_id: str, value: str) -> None:
+def save_secret(profile_id: str, value: str, *, service: str = KEYCHAIN_SERVICE) -> None:
     secret = (value or "").strip()
     if not secret:
-        delete_secret(profile_id)
+        delete_secret(profile_id, service=service)
         return
-    if is_compromised_secret(secret):
+    if service == KEYCHAIN_SERVICE and is_compromised_secret(secret):
         raise RuntimeError("That API key was included in an older build and has been disabled. Create a new key instead.")
 
     # `security` does not accept the password over stdin for add-generic-password,
@@ -83,16 +84,22 @@ def save_secret(profile_id: str, value: str) -> None:
         "-a",
         _account_name(profile_id),
         "-s",
-        KEYCHAIN_SERVICE,
+        service,
         "-w",
         secret,
     )
     if result.returncode != 0:
-        detail = result.stderr.strip() or "macOS Keychain rejected the API key."
+        detail = result.stderr.strip() or "macOS Keychain rejected the secret."
         raise RuntimeError(detail)
 
 
-def delete_secret(profile_id: str) -> None:
+def delete_all_secrets(profile_id: str) -> None:
+    """Remove everything stored for a profile: its API key and its ChatGPT sign-in."""
+    delete_secret(profile_id)
+    delete_secret(profile_id, service=CHATGPT_KEYCHAIN_SERVICE)
+
+
+def delete_secret(profile_id: str, *, service: str = KEYCHAIN_SERVICE) -> None:
     if sys.platform != "darwin":
         return
     _security_command(
@@ -100,5 +107,5 @@ def delete_secret(profile_id: str) -> None:
         "-a",
         _account_name(profile_id),
         "-s",
-        KEYCHAIN_SERVICE,
+        service,
     )

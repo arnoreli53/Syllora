@@ -11,6 +11,7 @@ try:
 except Exception:  # pragma: no cover - optional runtime dependency
     OpenAIClient = None
 
+from ai_backend import AIAuth, open_ai_client
 from syllabus_import import DEFAULT_SYLLABUS_AI_MODEL, SYLLABUS_OPENAI_TIMEOUT_SECONDS
 
 
@@ -179,8 +180,8 @@ Rules:
 class OpenAITranscriptExtractor:
     provider = "openai"
 
-    def __init__(self, api_key: str, model: str = DEFAULT_SYLLABUS_AI_MODEL) -> None:
-        self.api_key = (api_key or "").strip()
+    def __init__(self, auth: AIAuth, model: str = DEFAULT_SYLLABUS_AI_MODEL) -> None:
+        self.auth = auth
         self.model = (model or DEFAULT_SYLLABUS_AI_MODEL).strip() or DEFAULT_SYLLABUS_AI_MODEL
         self._client = None
 
@@ -195,15 +196,9 @@ class OpenAITranscriptExtractor:
     def extract(self, path: str) -> TranscriptExtractionResult:
         if OpenAIClient is None:
             raise TranscriptExtractionError("The OpenAI Python package is not installed.")
-        if not self.api_key:
-            raise TranscriptExtractionError("No OpenAI API key is configured.")
 
         try:
-            client = OpenAIClient(
-                api_key=self.api_key,
-                timeout=SYLLABUS_OPENAI_TIMEOUT_SECONDS,
-                max_retries=0,
-            )
+            client = open_ai_client(self.auth, model=self.model, timeout=SYLLABUS_OPENAI_TIMEOUT_SECONDS)
             self._client = client
             with open(path, "rb") as handle:
                 raw = handle.read()
@@ -254,30 +249,21 @@ class OpenAITranscriptExtractor:
         }
 
         try:
-            response = client.responses.create(
-                model=self.model,
-                input=[
+            response_text = client.generate_text(
+                system=(
+                    "You extract previous-course data from transcripts or academic records for a GPA tracker. "
+                    "Return only evidence-backed historical courses with explicit final grades and credit hours. "
+                    "Do not guess or infer missing percentages. Preserve letter grades when the record only shows letters."
+                ),
+                user_content=[
+                    {"type": "input_text", "text": build_transcript_extraction_prompt()},
                     {
-                        "role": "system",
-                        "content": (
-                            "You extract previous-course data from transcripts or academic records for a GPA tracker. "
-                            "Return only evidence-backed historical courses with explicit final grades and credit hours. "
-                            "Do not guess or infer missing percentages. Preserve letter grades when the record only shows letters."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "input_text", "text": build_transcript_extraction_prompt()},
-                            {
-                                "type": "input_file",
-                                "filename": os.path.basename(path),
-                                "file_data": f"data:{mime_type};base64,{encoded}",
-                            },
-                        ],
+                        "type": "input_file",
+                        "filename": os.path.basename(path),
+                        "file_data": f"data:{mime_type};base64,{encoded}",
                     },
                 ],
-                text={
+                text_format={
                     "format": {
                         "type": "json_schema",
                         "name": "transcript_extraction",
@@ -287,7 +273,7 @@ class OpenAITranscriptExtractor:
                 },
                 timeout=SYLLABUS_OPENAI_TIMEOUT_SECONDS,
             )
-            payload = json.loads(response.output_text)
+            payload = json.loads(response_text)
         except Exception as exc:
             raise TranscriptExtractionError(str(exc)) from exc
         finally:
@@ -330,10 +316,10 @@ class OpenAITranscriptExtractor:
 
 
 class TranscriptImportCoordinator:
-    def __init__(self, api_key: str = "", model: str = DEFAULT_SYLLABUS_AI_MODEL) -> None:
-        self.api_key = (api_key or "").strip()
+    def __init__(self, auth: AIAuth | None = None, model: str = DEFAULT_SYLLABUS_AI_MODEL) -> None:
+        self.auth = auth or AIAuth()
         self.model = (model or DEFAULT_SYLLABUS_AI_MODEL).strip() or DEFAULT_SYLLABUS_AI_MODEL
-        self._extractor = OpenAITranscriptExtractor(api_key=self.api_key, model=self.model)
+        self._extractor = OpenAITranscriptExtractor(auth=self.auth, model=self.model)
 
     def extract(self, path: str) -> TranscriptExtractionResult:
         return self._extractor.extract(path)

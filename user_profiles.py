@@ -9,7 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import paths
-from secret_store import delete_secret
+from secret_store import delete_all_secrets
 from version import APP_DB_FILENAME
 
 REGISTRY_PATH = paths.APP_SUPPORT_DIR / "users.json"
@@ -278,7 +278,7 @@ def delete_profile(profile_id: str) -> None:
     data["profiles"] = [_row_from_profile(p) for p in profiles]
     data["updated_at"] = datetime.now().isoformat(timespec="seconds")
     _write_registry(data)
-    delete_secret(profile.id)
+    delete_all_secrets(profile.id)
 
     profile_dir = profile.data_dir
     try:

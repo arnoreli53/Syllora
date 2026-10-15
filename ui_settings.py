@@ -53,7 +53,11 @@ from ui_common import (
 )
 from app_settings import app_qsettings, clear_all_app_qsettings
 from paths import APP_SUPPORT_DIR
-from secret_store import delete_secret, is_compromised_secret, load_secret, save_secret
+import threading
+
+import chatgpt_auth
+from ai_backend import AIAuth
+from secret_store import delete_all_secrets, is_compromised_secret, load_secret, save_secret
 from syllabus_import import (
     DEFAULT_SYLLABUS_AI_MODEL,
     SyllabusExtractionResult,
@@ -372,6 +376,16 @@ def get_effective_openai_api_key() -> str:
     return environment_key or get_saved_openai_api_key()
 
 
+def current_profile_id() -> str:
+    profile = current_profile()
+    return profile.id if profile is not None else "default"
+
+
+def current_ai_auth() -> AIAuth:
+    """A ChatGPT sign-in is used when present; an API key only covers installs that already had one."""
+    return AIAuth(profile_id=current_profile_id(), api_key=get_effective_openai_api_key())
+
+
 def ensure_syllabus_ai_defaults() -> None:
     legacy_key = get_str(SET_OPENAI_API_KEY, "").strip()
     if legacy_key:
@@ -681,32 +695,29 @@ class GradeScaleDialog(QDialog):
         return out
 
 
-class ApiKeyDialog(QDialog):
-    def __init__(self, initial_key: str, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("OpenAI API key")
-        self.setModal(True)
-        self.setMinimumWidth(440)
+class ChatGPTSignInWorker(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+    cancelled = Signal()
 
-        self.key_edit = QLineEdit()
-        self.key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.key_edit.setPlaceholderText("sk-...")
-        self.key_edit.setText(initial_key)
+    def __init__(self, profile_id: str):
+        super().__init__()
+        self._profile_id = profile_id
+        self._cancel_event = threading.Event()
 
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        btns.accepted.connect(self.accept)
-        btns.rejected.connect(self.reject)
+    def cancel(self) -> None:
+        self._cancel_event.set()
 
-        root = QVBoxLayout()
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(10)
-        root.addWidget(QLabel("Enter OpenAI API key"))
-        root.addWidget(self.key_edit)
-        root.addWidget(btns)
-        self.setLayout(root)
-
-    def api_key(self) -> str:
-        return self.key_edit.text().strip()
+    def run(self) -> None:
+        try:
+            session = chatgpt_auth.sign_in(self._profile_id, cancel_event=self._cancel_event)
+        except chatgpt_auth.ChatGPTSignInCancelled:
+            self.cancelled.emit()
+            return
+        except Exception as exc:
+            self.failed.emit(str(exc))
+            return
+        self.finished.emit(session)
 
 class DropLabel(QLabel):
     def __init__(self, path_edit: QLineEdit, *args, **kwargs):
@@ -1410,7 +1421,7 @@ class SyllabusImportFlow(QObject):
             return
 
         coordinator = SyllabusImportCoordinator(
-            api_key=get_effective_openai_api_key(),
+            auth=current_ai_auth(),
             model=get_syllabus_ai_model(),
             default_status=get_default_status(),
         )
@@ -2490,19 +2501,32 @@ class SettingsPage(QWidget):
         self.cmb_import_dup.addItem("allow duplicates", "allow")
         self.cmb_import_dup.addItem("overwrite duplicates", "overwrite")
 
-        self.lbl_api_key_status = QLabel()
-        self.lbl_api_key_status.setObjectName("Subtitle")
-        self.btn_set_api_key = QPushButton("Set API key")
-        self.btn_set_api_key.setObjectName("SecondaryButton")
-        self.btn_set_api_key.clicked.connect(self.edit_api_key)
-        api_key_row = QHBoxLayout()
-        api_key_row.setContentsMargins(0, 0, 0, 0)
-        api_key_row.setSpacing(8)
-        api_key_row.addWidget(self.lbl_api_key_status)
-        api_key_row.addStretch(1)
-        api_key_row.addWidget(self.btn_set_api_key)
-        api_key_row_w = QWidget()
-        api_key_row_w.setLayout(api_key_row)
+        self._chatgpt_thread: QThread | None = None
+        self._chatgpt_worker: ChatGPTSignInWorker | None = None
+        self._chatgpt_busy = False
+        self.lbl_chatgpt_status = QLabel()
+        self.lbl_chatgpt_status.setObjectName("Subtitle")
+        # Style sheets override the palette's link color, so color the text inline.
+        accent = theme_colors(get_theme())["accent"]
+        self.lbl_chatgpt_manage = QLabel(
+            f'<a href="{chatgpt_auth.USAGE_SETTINGS_URL}" style="text-decoration:none">'
+            f'<span style="color:{accent}">Manage usage</span></a>'
+        )
+        self.lbl_chatgpt_manage.setTextFormat(Qt.TextFormat.RichText)
+        self.lbl_chatgpt_manage.setOpenExternalLinks(True)
+        self.lbl_chatgpt_manage.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_chatgpt = QPushButton("Continue with ChatGPT")
+        self.btn_chatgpt.setObjectName("SecondaryButton")
+        self.btn_chatgpt.clicked.connect(self._toggle_chatgpt_sign_in)
+        chatgpt_row = QHBoxLayout()
+        chatgpt_row.setContentsMargins(0, 0, 0, 0)
+        chatgpt_row.setSpacing(12)
+        chatgpt_row.addWidget(self.lbl_chatgpt_status)
+        chatgpt_row.addWidget(self.btn_chatgpt)
+        chatgpt_row.addWidget(self.lbl_chatgpt_manage)
+        chatgpt_row.addStretch(1)
+        chatgpt_row_w = QWidget()
+        chatgpt_row_w.setLayout(chatgpt_row)
 
         self.cmb_grade_calc = QComboBox()
         self.cmb_grade_calc.addItem("graded only", "graded_only")
@@ -2825,11 +2849,9 @@ class SettingsPage(QWidget):
                     label_width=left_label_width,
                     control_width=left_input_width,
                 ),
-                _make_setting_row(
-                    "OpenAI API key",
-                    api_key_row_w,
-                    label_width=left_label_width,
-                    control_width=left_compound_width,
+                _make_stacked_setting_row(
+                    "ChatGPT account",
+                    chatgpt_row_w,
                 ),
                 _make_stacked_setting_row(
                     "Tools",
@@ -3157,18 +3179,86 @@ class SettingsPage(QWidget):
         dlg.exec()
         self._refresh_user_controls()
 
-    def edit_api_key(self) -> None:
-        dlg = ApiKeyDialog(get_effective_openai_api_key(), self)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+    def _toggle_chatgpt_sign_in(self) -> None:
+        if self._chatgpt_busy:
+            if self._chatgpt_worker is not None:
+                self._chatgpt_worker.cancel()
+            self.btn_chatgpt.setEnabled(False)
             return
-        profile = current_profile()
+        if chatgpt_auth.is_signed_in(current_profile_id()):
+            self._sign_out_of_chatgpt()
+        else:
+            self._start_chatgpt_sign_in()
+
+    def _start_chatgpt_sign_in(self) -> None:
+        self._chatgpt_busy = True
+        self._chatgpt_worker = ChatGPTSignInWorker(current_profile_id())
+        self._chatgpt_thread = QThread(self)
+        self._chatgpt_worker.moveToThread(self._chatgpt_thread)
+        self._chatgpt_thread.started.connect(self._chatgpt_worker.run)
+        self._chatgpt_worker.finished.connect(self._on_chatgpt_signed_in)
+        self._chatgpt_worker.failed.connect(self._on_chatgpt_failed)
+        self._chatgpt_worker.cancelled.connect(self._on_chatgpt_cancelled)
+        for signal in (self._chatgpt_worker.finished, self._chatgpt_worker.failed, self._chatgpt_worker.cancelled):
+            signal.connect(self._chatgpt_thread.quit)
+        self._chatgpt_thread.finished.connect(self._chatgpt_thread.deleteLater)
+        self._chatgpt_thread.finished.connect(self._chatgpt_worker.deleteLater)
+        self._chatgpt_thread.start()
+        self._update_chatgpt_status()
+
+    def _finish_chatgpt_attempt(self) -> None:
+        self._chatgpt_busy = False
+        self._chatgpt_thread = None
+        self._chatgpt_worker = None
+        self.btn_chatgpt.setEnabled(True)
+        self._update_chatgpt_status()
+
+    def _on_chatgpt_signed_in(self, session: object) -> None:
+        self._finish_chatgpt_attempt()
+        self.changed.emit()
+        if getattr(session, "plan_usage_enabled", False):
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Information)
+            box.setWindowTitle("ChatGPT")
+            box.setText("You're using your ChatGPT plan")
+            box.setInformativeText(
+                "Eligible AI usage in this app now uses your ChatGPT plan. "
+                "You can manage or limit it any time in your ChatGPT settings."
+            )
+            box.addButton("Got it", QMessageBox.ButtonRole.AcceptRole)
+            box.exec()
+        else:
+            QMessageBox.warning(
+                self,
+                "ChatGPT",
+                "You're signed in, but plan usage wasn't approved, so AI import can't run yet. "
+                "Choose Sign out, then continue with ChatGPT again and approve plan usage when asked.",
+            )
+
+    def _on_chatgpt_failed(self, message: str) -> None:
+        self._finish_chatgpt_attempt()
+        QMessageBox.critical(self, "ChatGPT", message)
+
+    def _on_chatgpt_cancelled(self) -> None:
+        self._finish_chatgpt_attempt()
+
+    def _sign_out_of_chatgpt(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Sign out of ChatGPT",
+            "This app will stop using your ChatGPT plan on this Mac.\n\n"
+            "To fully revoke its access, also remove it in your ChatGPT settings.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
         try:
-            save_secret(profile.id if profile is not None else "default", dlg.api_key())
-            _delete_setting(SET_OPENAI_API_KEY)
+            chatgpt_auth.sign_out(current_profile_id())
         except Exception as exc:
-            QMessageBox.critical(self, "API key", str(exc))
+            QMessageBox.critical(self, "ChatGPT", str(exc))
             return
-        self._update_api_key_status()
+        self._update_chatgpt_status()
         self.changed.emit()
 
     def _schedule_save(self, *_args) -> None:
@@ -3215,9 +3305,23 @@ class SettingsPage(QWidget):
 
         self.ed_backup_folder.textChanged.connect(self._schedule_save)
 
-    def _update_api_key_status(self) -> None:
-        key = get_effective_openai_api_key()
-        self.lbl_api_key_status.setText("AI Enabled" if key else "API Not set")
+    def _update_chatgpt_status(self) -> None:
+        status = chatgpt_auth.status(current_profile_id())
+        show_manage = False
+        if self._chatgpt_busy:
+            text, button = "Waiting for you to finish in your browser…", "Cancel"
+        elif status.signed_in:
+            who = status.email or status.name or "ChatGPT"
+            text = f"Signed in as {who}" + (" · Using ChatGPT plan" if status.plan_usage else " · Plan usage not approved")
+            button = "Sign out"
+            show_manage = status.plan_usage
+        elif get_effective_openai_api_key():
+            text, button = "Using a saved API key", "Continue with ChatGPT"
+        else:
+            text, button = "Not signed in", "Continue with ChatGPT"
+        self.lbl_chatgpt_status.setText(text)
+        self.btn_chatgpt.setText(button)
+        self.lbl_chatgpt_manage.setVisible(show_manage)
 
     def hideEvent(self, event) -> None:
         try:
@@ -3285,7 +3389,7 @@ class SettingsPage(QWidget):
             self._update_grade_scale_button_visibility()
             self._update_gpa_view_controls()
             self._update_overview_priority_controls()
-            self._update_api_key_status()
+            self._update_chatgpt_status()
             self.apply_settings()
         finally:
             self._loading_settings = False
@@ -3323,14 +3427,14 @@ class SettingsPage(QWidget):
         self.apply_settings()
         self._update_grade_scale_button_visibility()
         self._update_gpa_view_controls()
-        self._update_api_key_status()
+        self._update_chatgpt_status()
         self.changed.emit()
 
     def start_syllabus_import(self) -> None:
         self._syllabus_import_flow.start()
 
     def has_active_background_work(self) -> bool:
-        return self._syllabus_import_flow.is_active() or self._update_thread is not None
+        return self._syllabus_import_flow.is_active() or self._update_thread is not None or self._chatgpt_busy
 
     def cancel_syllabus_import(self) -> None:
         self._syllabus_import_flow.cancel()
@@ -3688,4 +3792,4 @@ def clear_all_app_data() -> None:
 
     clear_all_app_qsettings()
     profile = current_profile()
-    delete_secret(profile.id if profile is not None else "default")
+    delete_all_secrets(profile.id if profile is not None else "default")

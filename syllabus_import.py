@@ -17,6 +17,8 @@ try:
 except Exception:  # pragma: no cover - optional runtime dependency
     OpenAIClient = None
 
+from ai_backend import AIAuth, open_ai_client
+
 
 DEFAULT_SYLLABUS_AI_MODEL = "gpt-5.4-mini"
 SYLLABUS_OPENAI_TIMEOUT_SECONDS = 60.0
@@ -1412,8 +1414,8 @@ class LocalSyllabusExtractor:
 class OpenAISyllabusExtractor:
     provider = "openai"
 
-    def __init__(self, api_key: str, model: str = DEFAULT_SYLLABUS_AI_MODEL, default_status: str = "not started") -> None:
-        self.api_key = (api_key or "").strip()
+    def __init__(self, auth: AIAuth, model: str = DEFAULT_SYLLABUS_AI_MODEL, default_status: str = "not started") -> None:
+        self.auth = auth
         self.model = (model or DEFAULT_SYLLABUS_AI_MODEL).strip() or DEFAULT_SYLLABUS_AI_MODEL
         self.default_status = normalize_status(default_status)
         self._client = None
@@ -1429,15 +1431,9 @@ class OpenAISyllabusExtractor:
     def extract(self, path: str) -> SyllabusExtractionResult:
         if OpenAIClient is None:
             raise SyllabusExtractionError("The OpenAI Python package is not installed.")
-        if not self.api_key:
-            raise SyllabusExtractionError("No OpenAI API key is configured.")
 
         try:
-            client = OpenAIClient(
-                api_key=self.api_key,
-                timeout=SYLLABUS_OPENAI_TIMEOUT_SECONDS,
-                max_retries=0,
-            )
+            client = open_ai_client(self.auth, model=self.model, timeout=SYLLABUS_OPENAI_TIMEOUT_SECONDS)
             self._client = client
             with open(path, "rb") as f:
                 raw = f.read()
@@ -1579,31 +1575,22 @@ class OpenAISyllabusExtractor:
         }
 
         try:
-            response = client.responses.create(
-                model=self.model,
-                input=[
+            response_text = client.generate_text(
+                system=(
+                    "You extract syllabus task data for a grade tracker. "
+                    "Return grading_context, parent categories, real trackable child tasks, and brief warnings. "
+                    "Do not invent structure, recurring discussion counts, or task weights without syllabus evidence. "
+                    "Preserve repeated counts, raw grading units, recurrence, counted graded-item counts, and weight-scheme evidence when the syllabus explicitly states them."
+                ),
+                user_content=[
+                    {"type": "input_text", "text": prompt},
                     {
-                        "role": "system",
-                        "content": (
-                            "You extract syllabus task data for a grade tracker. "
-                            "Return grading_context, parent categories, real trackable child tasks, and brief warnings. "
-                            "Do not invent structure, recurring discussion counts, or task weights without syllabus evidence. "
-                            "Preserve repeated counts, raw grading units, recurrence, counted graded-item counts, and weight-scheme evidence when the syllabus explicitly states them."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "input_text", "text": prompt},
-                            {
-                                "type": "input_file",
-                                "filename": os.path.basename(path),
-                                "file_data": f"data:{mime_type};base64,{encoded}",
-                            },
-                        ],
+                        "type": "input_file",
+                        "filename": os.path.basename(path),
+                        "file_data": f"data:{mime_type};base64,{encoded}",
                     },
                 ],
-                text={
+                text_format={
                     "format": {
                         "type": "json_schema",
                         "name": "syllabus_extraction",
@@ -1613,7 +1600,7 @@ class OpenAISyllabusExtractor:
                 },
                 timeout=SYLLABUS_OPENAI_TIMEOUT_SECONDS,
             )
-            payload = json.loads(response.output_text)
+            payload = json.loads(response_text)
         except Exception as exc:
             raise SyllabusExtractionError(str(exc)) from exc
         finally:
@@ -1669,15 +1656,15 @@ class OpenAISyllabusExtractor:
 class SyllabusImportCoordinator:
     def __init__(
         self,
-        api_key: str = "",
+        auth: AIAuth | None = None,
         model: str = DEFAULT_SYLLABUS_AI_MODEL,
         default_status: str = "not started",
     ) -> None:
-        self.api_key = (api_key or "").strip()
+        self.auth = auth or AIAuth()
         self.model = (model or DEFAULT_SYLLABUS_AI_MODEL).strip() or DEFAULT_SYLLABUS_AI_MODEL
         self.default_status = normalize_status(default_status)
         self._extractor = OpenAISyllabusExtractor(
-            api_key=self.api_key,
+            auth=self.auth,
             model=self.model,
             default_status=self.default_status,
         )
