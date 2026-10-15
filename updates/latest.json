@@ -1,8 +1,8 @@
 {
-  "latest_version": "1.0.9.10.1",
-  "macos_zip_url": "https://github.com/arnoreli53/Syllora/releases/download/auto-v1.0.9.10.1/Syllora-1.0.9.10.1-macos.zip",
-  "sha256": "fa9675bbd24c1ef9114c563f2f1de800bda586a3da43e619adc2f15b78d4f111",
+  "latest_version": "1.0.9.11.1",
+  "macos_zip_url": "https://github.com/arnoreli53/Syllora/releases/download/auto-v1.0.9.11.1/Syllora-1.0.9.11.1-macos.zip",
+  "sha256": "621022426ace8ad2864897af50caad5e13959424d58d334b8027a46376f01576",
   "release_notes": [
-    "Automatic update for commit 9407260c19178e70eaf7b1ef2bacdacd05282012."
+    "Automatic update for commit ee6a04b073972dd948ac918be7b294bf248d0f2d."
   ]
 }
