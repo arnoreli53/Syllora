@@ -164,10 +164,10 @@ class MainWindow(QMainWindow):
 
         self.header = QFrame()
         self.header.setObjectName("AppHeader")
-        self.header.setFixedHeight(64)
+        self.header.setFixedHeight(68)
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(22, 0, 22, 0)
-        header_layout.setSpacing(24)
+        header_layout.setSpacing(14)
 
         brand_mark = QLabel()
         brand_mark.setObjectName("BrandMark")
@@ -183,11 +183,15 @@ class MainWindow(QMainWindow):
         brand_mark.setProperty("hasIcon", icon_pixmap is not None)
         header_layout.addWidget(brand_mark, 0, Qt.AlignmentFlag.AlignVCenter)
 
+        self.brand_name = QLabel(APP_DISPLAY_NAME)
+        self.brand_name.setObjectName("HeaderWordmark")
+        header_layout.addWidget(self.brand_name, 0, Qt.AlignmentFlag.AlignVCenter)
+
         self.nav_pill = QFrame()
         self.nav_pill.setObjectName("NavPill")
         nav_row = QHBoxLayout()
-        nav_row.setContentsMargins(4, 4, 4, 4)
-        nav_row.setSpacing(2)
+        nav_row.setContentsMargins(5, 5, 5, 5)
+        nav_row.setSpacing(4)
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
         self.nav_buttons: list[QPushButton] = []
@@ -199,37 +203,17 @@ class MainWindow(QMainWindow):
             button.setObjectName("HeaderNavButton")
             button.setCheckable(True)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setMinimumWidth(nav_metrics.horizontalAdvance(label) + 48)
+            button.setMinimumWidth(nav_metrics.horizontalAdvance(label) + 52)
+            button.setMinimumHeight(30)
             button.clicked.connect(lambda _checked=False, target=index: self.tab_widget.setCurrentIndex(target))
             self.nav_group.addButton(button, index)
             self.nav_buttons.append(button)
             nav_row.addWidget(button)
         self.nav_pill.setLayout(nav_row)
+        header_layout.addSpacing(18)
         header_layout.addWidget(self.nav_pill, 0, Qt.AlignmentFlag.AlignVCenter)
 
         header_layout.addStretch(1)
-
-        self.header_user = QWidget()
-        user_layout = QHBoxLayout()
-        user_layout.setContentsMargins(0, 0, 0, 0)
-        user_layout.setSpacing(10)
-        self.header_avatar = QLabel("L")
-        self.header_avatar.setObjectName("HeaderAvatar")
-        self.header_avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.header_avatar.setFixedSize(30, 30)
-        user_text_layout = QVBoxLayout()
-        user_text_layout.setContentsMargins(0, 0, 0, 0)
-        user_text_layout.setSpacing(0)
-        self.header_user_name = QLabel("Local workspace")
-        self.header_user_name.setObjectName("HeaderUserName")
-        self.header_user_detail = QLabel("Local workspace")
-        self.header_user_detail.setObjectName("HeaderUserDetail")
-        user_text_layout.addWidget(self.header_user_name)
-        user_text_layout.addWidget(self.header_user_detail)
-        user_layout.addWidget(self.header_avatar)
-        user_layout.addLayout(user_text_layout)
-        self.header_user.setLayout(user_layout)
-        header_layout.addWidget(self.header_user, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.version_label = QLabel(f"v{APP_VERSION}")
         self.version_label.setObjectName("HeaderVersion")
@@ -355,17 +339,6 @@ class MainWindow(QMainWindow):
             button.setChecked(button_index == index)
             button.blockSignals(False)
 
-    def _refresh_sidebar_identity(self) -> None:
-        profile = current_profile()
-        name = "" if profile is None else str(profile.name or "").strip()
-        display_name = name or "Local workspace"
-        # Elide rather than letting a long profile name crowd the version label next to it.
-        elided = QFontMetrics(self.header_user_name.font()).elidedText(display_name, Qt.TextElideMode.ElideRight, 180)
-        self.header_user_name.setText(elided)
-        self.header_user_detail.setVisible(bool(name))
-        self.header_avatar.setText(display_name[0].upper())
-        self.header_user.setToolTip(f"{name} · Local workspace" if name else "Local workspace")
-
     def _apply_window_size_constraints(self) -> None:
         target = QSize(self.DESIGN_WINDOW_SIZE)
         minimum = QSize(self.ABSOLUTE_MIN_WINDOW_SIZE)
@@ -390,8 +363,8 @@ class MainWindow(QMainWindow):
         # essential header content first so the nav buttons never get squeezed.
         if hasattr(self, "version_label"):
             self.version_label.setVisible(self.width() >= 940)
-        if hasattr(self, "header_user"):
-            self.header_user.setVisible(self.width() >= 860)
+        if hasattr(self, "brand_name"):
+            self.brand_name.setVisible(self.width() >= 1000)
 
     def apply_app_settings(self) -> None:
         theme = get_theme()
@@ -419,17 +392,22 @@ class MainWindow(QMainWindow):
                 font-weight: 800;
                 padding-bottom: 1px;
             }}
+            QLabel#HeaderWordmark {{
+                color: {colors['text_soft']};
+                font-size: 16px;
+                font-weight: 700;
+            }}
             QFrame#NavPill {{
                 background: {colors['panel_bg']};
                 border: 1px solid {colors['border_soft']};
-                border-radius: 14px;
+                border-radius: 18px;
             }}
             QPushButton#HeaderNavButton {{
                 background: transparent;
                 color: {colors['muted_text']};
-                border: 1px solid transparent;
-                border-radius: 10px;
-                padding: 7px 16px;
+                border: none;
+                border-radius: 13px;
+                padding: 6px 18px;
                 text-align: center;
                 font-size: 13px;
                 font-weight: 600;
@@ -439,37 +417,28 @@ class MainWindow(QMainWindow):
                 color: {colors['text_soft']};
             }}
             QPushButton#HeaderNavButton:checked {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(69, 178, 255, 0.34), stop:1 rgba(69, 178, 255, 0.20));
-                color: {colors['text_soft']};
-                border-color: rgba(69, 178, 255, 0.45);
-            }}
-            QLabel#HeaderAvatar {{
-                background: {colors['accent_tint']};
-                color: {colors['text_soft']};
-                border: 1px solid rgba(69, 178, 255, 0.40);
-                border-radius: 15px;
-                font-size: 12px;
+                background: {colors['accent']};
+                color: {colors['accent_text']};
                 font-weight: 700;
             }}
-            QLabel#HeaderUserName {{
-                color: {colors['text_soft']};
-                font-size: 12px;
-                font-weight: 650;
-            }}
-            QLabel#HeaderUserDetail {{
-                color: {colors['faint_text']};
-                font-size: 10px;
+            QPushButton#HeaderNavButton:checked:hover {{
+                background: {colors['accent_hover']};
+                color: {colors['accent_text']};
             }}
             QLabel#HeaderVersion {{
                 color: {colors['faint_text']};
-                font-size: 10px;
+                background: {colors['panel_bg']};
+                border: 1px solid {colors['border_soft']};
+                border-radius: 10px;
+                padding: 3px 10px;
+                font-size: 11px;
+                font-weight: 600;
             }}
             """
         )
         self.workspace.setStyleSheet(
             f"QFrame#AppWorkspace {{ background: {colors['window_bg']}; border: none; }}"
         )
-        self._refresh_sidebar_identity()
         _apply_macos_window_chrome(self, dark=(theme == "dark"))
         for page in (self.overview_page, self.tasks_page, self.courses_page, self.settings_page):
             if page is None:
